@@ -8,6 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts';
 import db from '@/lib/instant';
+import Sidebar from '@/app/components/Sidebar';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,11 +25,8 @@ const SEVERITY_BADGE: Record<string, string> = {
   Low:      'bg-blue-500/10 text-blue-400 border-blue-500/20',
 };
 const STATUS_BADGE: Record<string, string> = {
-  Open:                   'bg-red-500/10 text-red-400 border-red-500/20',
-  'In Progress':          'bg-orange-500/10 text-orange-400 border-orange-500/20',
-  Remediated:             'bg-green-500/10 text-green-400 border-green-500/20',
-  'Pending Verification': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  Closed:                 'bg-slate-700 text-slate-300 border-slate-600',
+  Open:   'bg-red-500/10 text-red-400 border-red-500/20',
+  Closed: 'bg-slate-700 text-slate-300 border-slate-600',
 };
 
 const TIME_RANGES = [
@@ -84,10 +82,12 @@ function StatCard({
 export default function Dashboard() {
   const router = useRouter();
   const { isLoading, user } = db.useAuth();
-  const { data: vulnData }       = db.useQuery({ vulnerabilities: {} });
-  const { data: triageData }     = db.useQuery({ triages: {} });
-  const { data: assessmentData } = db.useQuery({ assessments: {} });
-  const { data: remediationData } = db.useQuery({ remediations: {} });
+  const { data: vulnData }         = db.useQuery({ vulnerabilities:    {} });
+  const { data: triageData }       = db.useQuery({ triages:            {} });
+  const { data: assessmentData }   = db.useQuery({ assessments:        {} });
+  const { data: remediationData }  = db.useQuery({ remediations:       {} });
+  const { data: paData }           = db.useQuery({ productAssessments: {} });
+  const { data: ptData }           = db.useQuery({ productTriages:     {} });
 
   const [timeRange,       setTimeRange]       = useState(0);   // 0 = All
   const [filterSeverity,  setFilterSeverity]  = useState('');
@@ -105,29 +105,95 @@ export default function Dashboard() {
     );
   }
 
-  const allVulns      = vulnData?.vulnerabilities       ?? [];
-  const allTriages    = triageData?.triages             ?? [];
-  const allAssessments = assessmentData?.assessments   ?? [];
+  const allVulns       = vulnData?.vulnerabilities       ?? [];
+  const allTriages     = triageData?.triages             ?? [];
+  const allAssessments = assessmentData?.assessments     ?? [];
+  const allRemediations = remediationData?.remediations  ?? [];
+  const allPAs         = paData?.productAssessments      ?? [];
+  const allPTs         = ptData?.productTriages          ?? [];
 
-  // suggestedSeverity from assessments (fallback when no triage record exists)
+  // ── suggestedSeverity from assessments (fallback) ────────────────────────
   const assessSeverityByVuln: Record<string, string> = {};
   for (const a of allAssessments) {
     const ref = a.vulnerabilityRef as string;
-    if (ref && a.suggestedSeverity) {
-      assessSeverityByVuln[ref] = a.suggestedSeverity as string;
-    }
+    if (ref && a.suggestedSeverity) assessSeverityByVuln[ref] = a.suggestedSeverity as string;
   }
 
   // Severity lookup: triage takes precedence, assessment is fallback
   const severityByVuln: Record<string, string> = { ...assessSeverityByVuln };
-  const triageByVuln:   Record<string, typeof allTriages[number]> = {};
   for (const t of allTriages) {
     const ref = t.vulnerabilityRef as string;
     if (t.severity) severityByVuln[ref] = t.severity as string;
-    triageByVuln[ref] = t;
   }
 
-  // ── Time filter cutoff (based on dateDiscovered) ─────────────────────────
+  // ── Product-triage map keyed by `vulnId::productName` ───────────────────
+  const ptByKey: Record<string, typeof allPTs[number]> = {};
+  for (const pt of allPTs) {
+    const key = `${pt.vulnerabilityRef as string}::${pt.productName as string}`;
+    ptByKey[key] = pt;
+  }
+
+  // ── Remediation map keyed by `vulnId::productName` ───────────────────────
+  const remByProduct: Record<string, typeof allRemediations[number]> = {};
+  for (const r of allRemediations) {
+    const key = `${r.vulnerabilityRef as string}::${r.productName as string}`;
+    remByProduct[key] = r;
+  }
+
+  // ── Impacted products per vulnerability ──────────────────────────────────
+  const impactedByVuln: Record<string, string[]> = {};
+  for (const pa of allPAs) {
+    if (pa.impactStatus === 'Impacted') {
+      const ref = pa.vulnerabilityRef as string;
+      if (!impactedByVuln[ref]) impactedByVuln[ref] = [];
+      impactedByVuln[ref].push(pa.productName as string);
+    }
+  }
+
+  // ── Per-product "Done" logic ──────────────────────────────────────────────
+  function isProductDone(vulnId: string, productName: string): boolean {
+    const key = `${vulnId}::${productName}`;
+    const pt = ptByKey[key];
+    if (pt && (pt.status === 'Rejected' || pt.status === 'Risk Accepted')) return true;
+    const rem = remByProduct[key];
+    if (rem) {
+      const vs = rem.verificationStatus as string;
+      if (vs === 'Verified' || vs === "Can't Verify") return true;
+    }
+    return false;
+  }
+
+  // ── "Closed at" = latest timestamp among all done-product records ─────────
+  function closedAtForVuln(vulnId: string): number {
+    const impacted = impactedByVuln[vulnId] ?? [];
+    let latest = 0;
+    for (const productName of impacted) {
+      const key = `${vulnId}::${productName}`;
+      const pt  = ptByKey[key];
+      if (pt && (pt.status === 'Rejected' || pt.status === 'Risk Accepted')) {
+        const ts = (pt.updatedAt as number | undefined) ?? (pt.createdAt as number | undefined) ?? 0;
+        if (ts > latest) latest = ts;
+      }
+      const rem = remByProduct[key];
+      if (rem) {
+        const vs = rem.verificationStatus as string;
+        if (vs === 'Verified' || vs === "Can't Verify") {
+          const ts = (rem.updatedAt as number | undefined) ?? (rem.createdAt as number | undefined) ?? 0;
+          if (ts > latest) latest = ts;
+        }
+      }
+    }
+    return latest;
+  }
+
+  // ── Vulnerability "Closed" = all impacted products Done ──────────────────
+  function isVulnClosed(vulnId: string): boolean {
+    const impacted = impactedByVuln[vulnId];
+    if (!impacted || impacted.length === 0) return false;
+    return impacted.every((p) => isProductDone(vulnId, p));
+  }
+
+  // ── Time filter cutoff ────────────────────────────────────────────────────
   const cutoff = timeRange > 0 ? Date.now() - timeRange * 86_400_000 : 0;
   const vulns  = allVulns.filter((v) => {
     if (!cutoff) return true;
@@ -143,54 +209,29 @@ export default function Dashboard() {
     .filter((v) => {
       const vid = (v as { id: string }).id;
       if (filterSeverity && severityByVuln[vid] !== filterSeverity) return false;
-      if (filterStatus   && v.status !== filterStatus)               return false;
+      if (filterStatus) {
+        const closed = isVulnClosed(vid);
+        if (filterStatus === 'Closed' && !closed) return false;
+        if (filterStatus === 'Open'   &&  closed) return false;
+      }
       return true;
     });
 
   const vulnById: Record<string, typeof allVulns[number]> = {};
   for (const v of allVulns) vulnById[(v as { id: string }).id] = v;
 
-  // Remediation status map + full record map: latest remediation per vuln ID
-  const allRemediations = remediationData?.remediations ?? [];
-  const remStatusByVuln: Record<string, string> = {};
-  const remByVuln: Record<string, typeof allRemediations[number]> = {};
-  for (const r of allRemediations) {
-    const ref = r.vulnerabilityRef as string;
-    if (ref) { remStatusByVuln[ref] = r.status as string; remByVuln[ref] = r; }
-  }
-
-  // Effective "done" = vuln.status Remediated/Closed OR remediation.status Done
-  function isEffectivelyRemediated(v: typeof allVulns[number]): boolean {
-    const vid = (v as { id: string }).id;
-    return v.status === 'Remediated' || v.status === 'Closed' || remStatusByVuln[vid] === 'Done';
-  }
-
   // ── Summary metrics ───────────────────────────────────────────────────────
-  const zeroDayActive   = vulns.filter((v) => v.isZeroDay && !isEffectivelyRemediated(v)).length;
-  const remediatedCount = vulns.filter((v) => isEffectivelyRemediated(v)).length;
+  const zeroDayActive = vulns.filter((v) => v.isZeroDay && !isVulnClosed((v as { id: string }).id)).length;
+  const closedCount   = vulns.filter((v) => isVulnClosed((v as { id: string }).id)).length;
 
-  // Verification Status: count from remediations entity + vulns in Pending Verification
-  const verifiedCount   = allRemediations.filter((r) => r.verificationStatus === 'Verified').length;
-  const pendingVerCount = allRemediations.filter((r) => r.verificationStatus === 'Pending').length
-    + vulns.filter((v) => v.status === 'Pending Verification').length;
-  const failedVerCount  = allRemediations.filter((r) => r.verificationStatus === 'Failed').length;
-
-  // MTTR: avg days from vuln createdAt to best available resolution timestamp
-  // Iterates all vulns (not just ones with triage records) so nothing is missed.
-  // Resolution time priority: vuln.remediatedAt → remediation.completedAt/updatedAt → triage.updatedAt
+  // MTTR: avg days from vuln createdAt to when the last impacted product became Done
   let mttrTotal = 0, mttrCount = 0;
   for (const v of allVulns) {
-    if (!isEffectivelyRemediated(v)) continue;
-    const vid     = (v as { id: string }).id;
-    const created = (v.createdAt as number) ?? 0;
+    const vid = (v as { id: string }).id;
+    if (!isVulnClosed(vid)) continue;
+    const created  = (v.createdAt as number) ?? 0;
     if (!created) continue;
-    const rem    = remByVuln[vid];
-    const triage = triageByVuln[vid];
-    const resolved =
-      (v.remediatedAt as number | undefined) ??
-      (rem    ? ((rem.completedDate   as number | undefined) ?? (rem.updatedAt    as number | undefined)) : undefined) ??
-      (triage ? ((triage.updatedAt   as number | undefined))                                             : undefined) ??
-      0;
+    const resolved = closedAtForVuln(vid);
     if (resolved > created) {
       mttrTotal += (resolved - created) / 86_400_000;
       mttrCount++;
@@ -210,13 +251,13 @@ export default function Dashboard() {
     .map(([name, value]) => ({ name, value }));
 
   // ── Monthly trend (last 6 months) ─────────────────────────────────────────
-  const monthKeys    = last6MonthKeys();
-  const openByMonth: Record<string, number>  = {};
+  const monthKeys     = last6MonthKeys();
+  const openByMonth:  Record<string, number> = {};
   const fixedByMonth: Record<string, number> = {};
   for (const k of monthKeys) { openByMonth[k] = 0; fixedByMonth[k] = 0; }
 
   for (const v of allVulns) {
-    // Use dateDiscovered (actual discovery date) for the "Logged" bar
+    const vid = (v as { id: string }).id;
     const discoveredMs = v.dateDiscovered
       ? new Date(v.dateDiscovered as string).getTime()
       : ((v.createdAt as number) ?? 0);
@@ -224,11 +265,8 @@ export default function Dashboard() {
     const mk = monthKey(discoveredMs);
     if (mk in openByMonth) openByMonth[mk]++;
 
-    if (isEffectivelyRemediated(v)) {
-      // Prefer remediatedAt on the vuln itself; fall back to triage.updatedAt
-      const triage   = triageByVuln[(v as { id: string }).id];
-      const resolved = (v.remediatedAt as number)
-        ?? (triage ? ((triage.updatedAt as number) ?? 0) : 0);
+    if (isVulnClosed(vid)) {
+      const resolved = closedAtForVuln(vid);
       if (resolved) {
         const rmk = monthKey(resolved);
         if (rmk in fixedByMonth) fixedByMonth[rmk]++;
@@ -236,9 +274,9 @@ export default function Dashboard() {
     }
   }
   const trendData = monthKeys.map((k) => ({
-    month:      monthLabel(k),
-    Logged:     openByMonth[k],
-    Remediated: fixedByMonth[k],
+    month:   monthLabel(k),
+    Logged:  openByMonth[k],
+    Closed:  fixedByMonth[k],
   }));
 
   // ── SLA overdue indicator ─────────────────────────────────────────────────
@@ -246,42 +284,17 @@ export default function Dashboard() {
   const now = Date.now();
   for (const t of allTriages) {
     if (!t.slaDeadline) continue;
-    const vuln = vulnById[t.vulnerabilityRef as string];
-    if (!vuln || isEffectivelyRemediated(vuln)) continue;
+    const vid  = t.vulnerabilityRef as string;
+    const vuln = vulnById[vid];
+    if (!vuln || isVulnClosed(vid)) continue;
     if (new Date(t.slaDeadline as string).getTime() < now) {
-      overdueVulnIds.add(t.vulnerabilityRef as string);
+      overdueVulnIds.add(vid);
     }
   }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
-      {/* Sidebar */}
-      <aside className="w-56 border-r border-slate-800 flex flex-col px-4 py-6 gap-1 shrink-0">
-        <div className="flex items-center gap-2 mb-8 px-2">
-          <div className="w-7 h-7 bg-red-600 rounded flex items-center justify-center text-white font-bold text-xs">ZA</div>
-          <span className="font-semibold text-white text-sm">Zero-Day Atlas</span>
-        </div>
-        {[
-          { label: 'Dashboard',       href: '/dashboard',       icon: '◉', active: true },
-          { label: 'Vulnerabilities', href: '/vulnerabilities', icon: '⚠' },
-          { label: 'Products',        href: '/products',        icon: '⬡' },
-          { label: 'Reports',         href: '/reports',         icon: '📊' },
-          { label: 'Settings',        href: '/settings',        icon: '⚙' },
-        ].map((item) => (
-          <Link key={item.label} href={item.href}
-            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-              item.active ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-            }`}>
-            <span className="text-base">{item.icon}</span>{item.label}
-          </Link>
-        ))}
-        <div className="mt-auto pt-6 border-t border-slate-800">
-          <button onClick={() => db.auth.signOut()}
-            className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition">
-            <span>↩</span> Sign Out
-          </button>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main */}
       <main className="flex-1 p-8 overflow-y-auto">
@@ -317,7 +330,8 @@ export default function Dashboard() {
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
                 className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500 transition appearance-none">
                 <option value="">All Statuses</option>
-                {['Open','In Progress','Pending Verification','Remediated','Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+                <option value="Open">Open</option>
+                <option value="Closed">Closed</option>
               </select>
 
               <Link href="/log-vulnerability"
@@ -328,22 +342,24 @@ export default function Dashboard() {
           </div>
 
           {/* ── Summary cards ─────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            <StatCard label="Zero-Day Active"        value={zeroDayActive}   color="text-red-500"    sub="Unresolved zero-days" />
-            <StatCard label="Remediated"             value={remediatedCount} color="text-green-400"  sub="Fully resolved" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <StatCard
-              label="Verification Status"
-              value={verifiedCount > 0 || pendingVerCount > 0 || failedVerCount > 0 ? `${verifiedCount} Verified` : '—'}
-              color={failedVerCount > 0 ? 'text-red-400' : verifiedCount > 0 ? 'text-green-400' : 'text-slate-500'}
-              sub={verifiedCount + pendingVerCount + failedVerCount > 0
-                ? `${pendingVerCount} pending · ${failedVerCount} failed`
-                : 'No verification data yet'}
+              label="Zero-Day Active"
+              value={zeroDayActive}
+              color="text-red-500"
+              sub="Unresolved zero-days"
+            />
+            <StatCard
+              label="Closed"
+              value={closedCount}
+              color="text-green-400"
+              sub="All impacted products resolved"
             />
             <StatCard
               label="Avg. Time to Remediate"
               value={mttr !== null ? `${mttr}d` : '—'}
               color={mttr !== null ? (Number(mttr) <= 15 ? 'text-green-400' : Number(mttr) <= 30 ? 'text-yellow-400' : 'text-red-400') : 'text-slate-500'}
-              sub={mttrCount > 0 ? `Based on ${mttrCount} remediated` : 'No remediated vulns yet'}
+              sub={mttrCount > 0 ? `Based on ${mttrCount} closed` : 'No closed vulns yet'}
             />
           </div>
 
@@ -387,8 +403,8 @@ export default function Dashboard() {
             {/* Monthly trend bar chart */}
             <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-6">
               <h2 className="text-white font-semibold text-sm mb-1">Vulnerability Trend</h2>
-              <p className="text-slate-500 text-xs mb-4">Logged vs Remediated — last 6 months</p>
-              {trendData.every((d) => d.Logged === 0 && d.Remediated === 0) ? (
+              <p className="text-slate-500 text-xs mb-4">Logged vs Closed — last 6 months</p>
+              {trendData.every((d) => d.Logged === 0 && d.Closed === 0) ? (
                 <div className="flex items-center justify-center h-40 text-slate-600 text-sm">No data yet</div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
@@ -402,8 +418,8 @@ export default function Dashboard() {
                       cursor={{ fill: '#334155', opacity: 0.4 }}
                     />
                     <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8', paddingTop: 8 }} />
-                    <Bar dataKey="Logged"     fill="#ef4444" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Remediated" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Logged" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Closed" fill="#22c55e" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -453,6 +469,8 @@ export default function Dashboard() {
                     {tableVulns.map((v) => {
                       const vid      = (v as { id: string }).id;
                       const severity = severityByVuln[vid] ?? '';
+                      const closed   = isVulnClosed(vid);
+                      const displayStatus = closed ? 'Closed' : 'Open';
                       return (
                         <tr key={vid} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
                           <td className="px-6 py-3">
@@ -477,16 +495,9 @@ export default function Dashboard() {
                             )}
                           </td>
                           <td className="px-6 py-3">
-                            {(() => {
-                              const effectiveStatus = remStatusByVuln[vid] === 'Done'
-                                ? 'Remediated'
-                                : (v.status as string) ?? 'Open';
-                              return (
-                                <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[effectiveStatus] ?? 'bg-slate-700 text-slate-300 border-slate-600'}`}>
-                                  {effectiveStatus}
-                                </span>
-                              );
-                            })()}
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[displayStatus]}`}>
+                              {displayStatus}
+                            </span>
                           </td>
                           <td className="px-6 py-3">
                             <div className="flex items-center gap-1">

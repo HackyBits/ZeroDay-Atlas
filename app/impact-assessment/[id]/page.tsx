@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { id as instantId } from '@instantdb/react';
 import db from '@/lib/instant';
+import Sidebar from '@/app/components/Sidebar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,9 @@ export default function ImpactAssessmentPage() {
 
   if (!vuln) return <Spinner />;
 
+  // Sections 2–4 are read-only once an assessment record exists (set during Log Vulnerability)
+  const isReadOnly = !!existingAssessment;
+
   // ── Handlers
 
   function setProductStatus(name: string, status: ImpactStatus) {
@@ -219,31 +223,7 @@ export default function ImpactAssessmentPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
-      {/* Sidebar */}
-      <aside className="w-56 border-r border-slate-800 flex flex-col px-4 py-6 gap-1 shrink-0">
-        <div className="flex items-center gap-2 mb-8 px-2">
-          <div className="w-7 h-7 bg-red-600 rounded flex items-center justify-center text-white font-bold text-xs">ZA</div>
-          <span className="font-semibold text-white text-sm">Zero-Day Atlas</span>
-        </div>
-        {[
-          { label: 'Dashboard',       href: '/dashboard',       icon: '◉' },
-          { label: 'Vulnerabilities', href: '/vulnerabilities', icon: '⚠' },
-          { label: 'Products',        href: '/products',        icon: '⬡' },
-          { label: 'Reports',         href: '/reports',         icon: '📊' },
-          { label: 'Settings',        href: '/settings',        icon: '⚙' },
-        ].map((item) => (
-          <Link key={item.label} href={item.href}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition">
-            <span className="text-base">{item.icon}</span>{item.label}
-          </Link>
-        ))}
-        <div className="mt-auto pt-6 border-t border-slate-800">
-          <button onClick={() => db.auth.signOut()}
-            className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition">
-            <span>↩</span> Sign Out
-          </button>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main */}
       <main className="flex-1 p-8 overflow-y-auto">
@@ -362,19 +342,30 @@ export default function ImpactAssessmentPage() {
           </div>
 
           {/* ── Section 2: Affected Components ── */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-5">
-            <div className="mb-5">
-              <h3 className="text-white font-semibold text-sm">Affected Components</h3>
-              <p className="text-slate-400 text-xs mt-0.5">Select the system components where this vulnerability exists.</p>
+          <div className={`bg-slate-900 border rounded-xl p-6 mb-5 ${isReadOnly ? 'border-slate-700/50' : 'border-slate-800'}`}>
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h3 className="text-white font-semibold text-sm">Affected Components</h3>
+                <p className="text-slate-400 text-xs mt-0.5">Select the system components where this vulnerability exists.</p>
+              </div>
+              {isReadOnly && (
+                <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full shrink-0">
+                  🔒 Read-only
+                </span>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2 mb-4">
               {COMPONENT_OPTIONS.map((comp) => (
-                <button key={comp} onClick={() => toggleComponent(comp)}
+                <button key={comp}
+                  onClick={isReadOnly ? undefined : () => toggleComponent(comp)}
+                  disabled={isReadOnly}
                   className={`text-xs px-3 py-1.5 rounded-full border transition ${
                     components.includes(comp)
                       ? 'bg-red-500/10 border-red-500/40 text-red-400'
-                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                      : isReadOnly
+                        ? 'bg-slate-800/50 border-slate-700/50 text-slate-600 cursor-default'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300'
                   }`}>
                   {components.includes(comp) ? '✓ ' : ''}{comp}
                 </button>
@@ -392,7 +383,8 @@ export default function ImpactAssessmentPage() {
                       placeholder="e.g. OpenSSL 3.1, glibc 2.35…"
                       value={subComponents[comp] ?? ''}
                       onChange={(e) => setSubComponent(comp, e.target.value)}
-                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
+                      readOnly={isReadOnly}
+                      className={`flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 transition ${isReadOnly ? 'cursor-default opacity-60 focus:outline-none' : 'focus:outline-none focus:border-red-500'}`}
                     />
                   </div>
                 ))}
@@ -401,40 +393,51 @@ export default function ImpactAssessmentPage() {
           </div>
 
           {/* ── Section 3: Risk Assessment ── */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-5">
-            <div className="mb-5">
-              <h3 className="text-white font-semibold text-sm">Risk Assessment</h3>
-              <p className="text-slate-400 text-xs mt-0.5">Versions affected and business risk factors that drive the overall risk score.</p>
+          <div className={`bg-slate-900 border rounded-xl p-6 mb-5 ${isReadOnly ? 'border-slate-700/50' : 'border-slate-800'}`}>
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h3 className="text-white font-semibold text-sm">Risk Assessment</h3>
+                <p className="text-slate-400 text-xs mt-0.5">Versions affected and business risk factors that drive the overall risk score.</p>
+              </div>
+              {isReadOnly && (
+                <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full shrink-0">
+                  🔒 Read-only
+                </span>
+              )}
             </div>
 
             {/* Versions Impacted */}
             <div className="mb-6">
               <p className="text-sm font-medium text-slate-300 mb-2">Versions Impacted</p>
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text"
-                  value={versionInput}
-                  onChange={(e) => setVersionInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addVersion())}
-                  placeholder="e.g. 3.0.1, < 2.4, 2023.1 …"
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
-                />
-                <button onClick={addVersion}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition">
-                  Add
-                </button>
-              </div>
+              {!isReadOnly && (
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={versionInput}
+                    onChange={(e) => setVersionInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addVersion())}
+                    placeholder="e.g. 3.0.1, < 2.4, 2023.1 …"
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
+                  />
+                  <button onClick={addVersion}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition">
+                    Add
+                  </button>
+                </div>
+              )}
               {versionsImpacted.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {versionsImpacted.map((v) => (
                     <span key={v} className="inline-flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-xs px-3 py-1 rounded-full">
                       {v}
-                      <button onClick={() => removeVersion(v)} className="text-slate-500 hover:text-red-400 transition text-xs">✕</button>
+                      {!isReadOnly && (
+                        <button onClick={() => removeVersion(v)} className="text-slate-500 hover:text-red-400 transition text-xs">✕</button>
+                      )}
                     </span>
                   ))}
                 </div>
               ) : (
-                <p className="text-slate-600 text-xs">No versions added yet.</p>
+                <p className="text-slate-600 text-xs">No versions added.</p>
               )}
             </div>
 
@@ -443,13 +446,17 @@ export default function ImpactAssessmentPage() {
               <p className="text-sm font-medium text-slate-300 mb-2">Business Impact <span className="text-slate-500 font-normal text-xs">Operational impact if exploited</span></p>
               <div className="flex gap-2">
                 {(['Low', 'Medium', 'High'] as BusinessImpact[]).map((v) => (
-                  <button key={v} onClick={() => { setBusinessImpact(v); setSaved(false); }}
+                  <button key={v}
+                    onClick={isReadOnly ? undefined : () => { setBusinessImpact(v); setSaved(false); }}
+                    disabled={isReadOnly}
                     className={`flex-1 py-2.5 text-sm font-medium rounded-lg border-2 transition ${
                       businessImpact === v
                         ? v === 'High'   ? 'bg-red-500/10 border-red-500 text-red-400'
                           : v === 'Medium' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-400'
                           : 'bg-blue-500/10 border-blue-500 text-blue-400'
-                        : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                        : isReadOnly
+                          ? 'border-slate-700/50 bg-slate-800/50 text-slate-600 cursor-default'
+                          : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
                     }`}>
                     {v}
                   </button>
@@ -462,11 +469,15 @@ export default function ImpactAssessmentPage() {
               <p className="text-sm font-medium text-slate-300 mb-2">Data Sensitivity <span className="text-slate-500 font-normal text-xs">Classification of data handled</span></p>
               <div className="grid grid-cols-2 gap-2">
                 {(['Public', 'Internal', 'Confidential', 'Restricted'] as DataSensitivity[]).map((v) => (
-                  <button key={v} onClick={() => { setDataSensitivity(v); setSaved(false); }}
+                  <button key={v}
+                    onClick={isReadOnly ? undefined : () => { setDataSensitivity(v); setSaved(false); }}
+                    disabled={isReadOnly}
                     className={`py-2.5 text-sm rounded-lg border-2 transition ${
                       dataSensitivity === v
                         ? 'bg-red-500/10 border-red-500 text-red-400'
-                        : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                        : isReadOnly
+                          ? 'border-slate-700/50 bg-slate-800/50 text-slate-600 cursor-default'
+                          : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
                     }`}>
                     {v}
                   </button>
@@ -479,13 +490,17 @@ export default function ImpactAssessmentPage() {
               <p className="text-sm font-medium text-slate-300 mb-2">Exposure Level <span className="text-slate-500 font-normal text-xs">How the system is exposed on the network</span></p>
               <div className="flex gap-2">
                 {(['Internal', 'External', 'Internet-facing'] as ExposureLevel[]).map((v) => (
-                  <button key={v} onClick={() => { setExposureLevel(v); setSaved(false); }}
+                  <button key={v}
+                    onClick={isReadOnly ? undefined : () => { setExposureLevel(v); setSaved(false); }}
+                    disabled={isReadOnly}
                     className={`flex-1 py-2.5 text-sm rounded-lg border-2 transition ${
                       exposureLevel === v
                         ? v === 'Internet-facing' ? 'bg-red-500/10 border-red-500 text-red-400'
                           : v === 'External'       ? 'bg-orange-500/10 border-orange-500 text-orange-400'
                           : 'bg-slate-700 border-slate-500 text-slate-300'
-                        : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                        : isReadOnly
+                          ? 'border-slate-700/50 bg-slate-800/50 text-slate-600 cursor-default'
+                          : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
                     }`}>
                     {v}
                   </button>
@@ -524,18 +539,33 @@ export default function ImpactAssessmentPage() {
           </div>
 
           {/* ── Section 4: External Reference Link ── */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
-            <div className="mb-4">
-              <h3 className="text-white font-semibold text-sm">External Reference Link</h3>
-              <p className="text-slate-400 text-xs mt-0.5">CVE details, vendor advisory, or NVD entry for this vulnerability.</p>
+          <div className={`bg-slate-900 border rounded-xl p-6 mb-8 ${isReadOnly ? 'border-slate-700/50' : 'border-slate-800'}`}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-white font-semibold text-sm">External Reference Link</h3>
+                <p className="text-slate-400 text-xs mt-0.5">CVE details, vendor advisory, or NVD entry for this vulnerability.</p>
+              </div>
+              {isReadOnly && (
+                <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full shrink-0">
+                  🔒 Read-only
+                </span>
+              )}
             </div>
-            <input
-              type="url"
-              value={externalLink}
-              onChange={(e) => { setExternalLink(e.target.value); setSaved(false); }}
-              placeholder="https://nvd.nist.gov/vuln/detail/CVE-..."
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
-            />
+            {isReadOnly && externalLink ? (
+              <a href={externalLink} target="_blank" rel="noopener noreferrer"
+                className="text-sm text-red-400 hover:text-red-300 underline underline-offset-2 break-all transition">
+                {externalLink}
+              </a>
+            ) : (
+              <input
+                type="url"
+                value={externalLink}
+                onChange={(e) => { setExternalLink(e.target.value); setSaved(false); }}
+                placeholder="https://nvd.nist.gov/vuln/detail/CVE-..."
+                readOnly={isReadOnly}
+                className={`w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500 transition ${isReadOnly ? 'opacity-60 cursor-default focus:outline-none' : 'focus:outline-none focus:border-red-500'}`}
+              />
+            )}
           </div>
 
           {/* Actions */}

@@ -9,6 +9,7 @@ import {
   LineChart, Line,
 } from 'recharts';
 import db from '@/lib/instant';
+import Sidebar from '@/app/components/Sidebar';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -202,37 +203,6 @@ function ExportBtn({ onClick }: { onClick: () => void }) {
       className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition flex items-center gap-1.5">
       ↓ Export CSV
     </button>
-  );
-}
-
-// ─── Sidebar ──────────────────────────────────────────────────────────────────
-
-function Sidebar() {
-  return (
-    <aside className="w-56 border-r border-slate-800 flex flex-col px-4 py-6 gap-1 shrink-0">
-      <div className="flex items-center gap-2 mb-8 px-2">
-        <div className="w-7 h-7 bg-red-600 rounded flex items-center justify-center text-white font-bold text-xs">ZA</div>
-        <span className="font-semibold text-white text-sm">Zero-Day Atlas</span>
-      </div>
-      {[
-        { label: 'Dashboard',       href: '/dashboard',       icon: '◉' },
-        { label: 'Vulnerabilities', href: '/vulnerabilities', icon: '⚠' },
-        { label: 'Products',        href: '/products',        icon: '⬡' },
-        { label: 'Reports',         href: '/reports',         icon: '📊', active: true },
-        { label: 'Settings',        href: '/settings',        icon: '⚙' },
-      ].map((item) => (
-        <Link key={item.label} href={item.href}
-          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${'active' in item && item.active ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}>
-          <span className="text-base">{item.icon}</span>{item.label}
-        </Link>
-      ))}
-      <div className="mt-auto pt-6 border-t border-slate-800">
-        <button onClick={() => db.auth.signOut()}
-          className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition">
-          <span>↩</span> Sign Out
-        </button>
-      </div>
-    </aside>
   );
 }
 

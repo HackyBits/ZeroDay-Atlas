@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import db from '@/lib/instant';
+import Sidebar from '@/app/components/Sidebar';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,11 +36,8 @@ const SEVERITY_STYLE: Record<string, string> = {
   Low:      'bg-blue-500/10 text-blue-400 border-blue-500/30',
 };
 const STATUS_BADGE: Record<string, string> = {
-  Open:                   'bg-red-500/10 text-red-400 border-red-500/20',
-  'In Progress':          'bg-orange-500/10 text-orange-400 border-orange-500/20',
-  Remediated:             'bg-green-500/10 text-green-400 border-green-500/20',
-  'Pending Verification': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  Closed:                 'bg-slate-700 text-slate-400 border-slate-600',
+  Open:   'bg-red-500/10 text-red-400 border-red-500/20',
+  Closed: 'bg-slate-700 text-slate-400 border-slate-600',
 };
 const TRIAGE_STATUS_STYLE: Record<string, string> = {
   Accepted:         'bg-green-500/10 text-green-400 border-green-500/30',
@@ -61,39 +59,6 @@ const VERIFY_STATUS_STYLE: Record<string, string> = {
   Pending:       'bg-slate-700 text-slate-400 border-slate-600',
   "Can't Verify": 'bg-slate-700 text-slate-400 border-slate-600',
 };
-
-// ─── Sidebar ──────────────────────────────────────────────────────────────────
-
-function Sidebar() {
-  return (
-    <aside className="w-56 border-r border-slate-800 flex flex-col px-4 py-6 gap-1 shrink-0">
-      <div className="flex items-center gap-2 mb-8 px-2">
-        <div className="w-7 h-7 bg-red-600 rounded flex items-center justify-center text-white font-bold text-xs">ZA</div>
-        <span className="font-semibold text-white text-sm">Zero-Day Atlas</span>
-      </div>
-      {[
-        { label: 'Dashboard',       href: '/dashboard',       icon: '◉' },
-        { label: 'Vulnerabilities', href: '/vulnerabilities', icon: '⚠' },
-        { label: 'Products',        href: '/products',        icon: '⬡', active: true },
-        { label: 'Reports',         href: '/reports',         icon: '📊' },
-        { label: 'Settings',        href: '/settings',        icon: '⚙' },
-      ].map((item) => (
-        <Link key={item.label} href={item.href}
-          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-            item.active ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-          }`}>
-          <span className="text-base">{item.icon}</span>{item.label}
-        </Link>
-      ))}
-      <div className="mt-auto pt-6 border-t border-slate-800">
-        <button onClick={() => db.auth.signOut()}
-          className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition">
-          <span>↩</span> Sign Out
-        </button>
-      </div>
-    </aside>
-  );
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -132,11 +97,46 @@ export default function ProductsPage() {
   const vulnById: Record<string, typeof vulns[number]> = {};
   for (const v of vulns) vulnById[(v as { id: string }).id] = v;
 
-  // Sort vulns: zero-days first, then by createdAt desc
-  const sortedVulns = [...vulns].sort((a, b) => {
-    if ((b.isZeroDay as boolean) !== (a.isZeroDay as boolean)) return (b.isZeroDay ? 1 : 0) - (a.isZeroDay ? 1 : 0);
-    return ((b.createdAt as number) ?? 0) - ((a.createdAt as number) ?? 0);
-  });
+  // ── isVulnClosed logic (mirrors dashboard) ───────────────────────────────
+  const ptStatusMap: Record<string, string> = {};
+  for (const pt of allPTs) {
+    const key = `${pt.vulnerabilityRef as string}::${pt.productName as string}`;
+    ptStatusMap[key] = pt.status as string;
+  }
+  const remByProduct: Record<string, typeof allRems[number]> = {};
+  for (const r of allRems) {
+    const key = `${r.vulnerabilityRef as string}::${r.productName as string}`;
+    remByProduct[key] = r;
+  }
+  const impactedByVuln: Record<string, string[]> = {};
+  for (const pa of allPAs) {
+    if (pa.impactStatus === 'Impacted') {
+      const ref = pa.vulnerabilityRef as string;
+      if (!impactedByVuln[ref]) impactedByVuln[ref] = [];
+      impactedByVuln[ref].push(pa.productName as string);
+    }
+  }
+  function isProductDone(vulnId: string, productName: string): boolean {
+    const key = `${vulnId}::${productName}`;
+    const ptStatus = ptStatusMap[key];
+    if (ptStatus === 'Rejected' || ptStatus === 'Risk Accepted') return true;
+    const rem = remByProduct[key];
+    if (rem) {
+      const vs = rem.verificationStatus as string;
+      if (vs === 'Verified' || vs === "Can't Verify") return true;
+    }
+    return false;
+  }
+  function isVulnClosed(vulnId: string): boolean {
+    const impacted = impactedByVuln[vulnId];
+    if (!impacted || impacted.length === 0) return false;
+    return impacted.every((p) => isProductDone(vulnId, p));
+  }
+
+  // Sort vulns: by createdAt desc
+  const sortedVulns = [...vulns].sort(
+    (a, b) => ((b.createdAt as number) ?? 0) - ((a.createdAt as number) ?? 0)
+  );
 
   // ── Scoped to selected vulnerability ──────────────────────────────────────
 
@@ -263,27 +263,22 @@ export default function ProductsPage() {
                       <button key={vid} onClick={() => setSelectedVulnId(vid)}
                         className="w-full flex items-center gap-4 px-6 py-4 hover:bg-slate-800/40 transition text-left group">
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded group-hover:text-white transition">
-                              {v.vulnerabilityId as string}
-                            </span>
-                            {v.isZeroDay && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />Zero-Day
-                              </span>
-                            )}
-                            {v.cveId && (
-                              <span className="text-xs text-slate-500 font-mono">{v.cveId as string}</span>
-                            )}
-                          </div>
-                          <p className="text-white text-sm font-medium truncate group-hover:text-red-300 transition">
+                          <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded group-hover:text-white transition">
+                            {v.vulnerabilityId as string}
+                          </span>
+                          <p className="text-white text-sm font-medium truncate group-hover:text-red-300 transition mt-1">
                             {v.title as string}
                           </p>
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[v.status as string] ?? 'bg-slate-700 text-slate-400 border-slate-600'}`}>
-                            {(v.status as string) ?? 'Open'}
-                          </span>
+                          {(() => {
+                            const displayStatus = isVulnClosed(vid) ? 'Closed' : 'Open';
+                            return (
+                              <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[displayStatus]}`}>
+                                {displayStatus}
+                              </span>
+                            );
+                          })()}
                           <span className="text-slate-600 group-hover:text-slate-400 transition text-sm">→</span>
                         </div>
                       </button>
