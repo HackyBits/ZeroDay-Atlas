@@ -35,10 +35,6 @@ const SEVERITY_STYLE: Record<string, string> = {
   Medium:   'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
   Low:      'bg-blue-500/10 text-blue-400 border-blue-500/30',
 };
-const STATUS_BADGE: Record<string, string> = {
-  Open:   'bg-red-500/10 text-red-400 border-red-500/20',
-  Closed: 'bg-slate-700 text-slate-400 border-slate-600',
-};
 const TRIAGE_STATUS_STYLE: Record<string, string> = {
   Accepted:         'bg-green-500/10 text-green-400 border-green-500/30',
   Rejected:         'bg-red-500/10 text-red-400 border-red-500/30',
@@ -231,69 +227,11 @@ export default function ProductsPage() {
   const selectedProductIcon = PLANVIEW_PRODUCTS.find((p) => p.name === selectedProduct)?.icon ?? '⬡';
   const selectedProductStatus = selectedVulnId ? productStatusForVuln(selectedProduct, selectedVulnId) : 'Unknown';
 
-  // ── STEP 1: Vulnerability list ─────────────────────────────────────────────
-
-  if (!selectedVulnId) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex">
-        <Sidebar />
-        <main className="flex-1 p-8 overflow-y-auto">
-          <div className="max-w-3xl mx-auto">
-            <div className="mb-8">
-              <h1 className="text-xl font-bold text-white">Products</h1>
-              <p className="text-slate-400 text-sm mt-0.5">Select a vulnerability to view product exposure</p>
-            </div>
-
-            {sortedVulns.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-16 text-center">
-                <div className="text-4xl mb-4">⚠</div>
-                <h2 className="text-white font-semibold mb-2">No vulnerabilities logged yet</h2>
-                <p className="text-slate-400 text-sm mb-6">Log a vulnerability first to track product exposure.</p>
-                </div>
-            ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-                  <h2 className="text-white font-semibold text-sm">Vulnerabilities</h2>
-                  <span className="text-slate-500 text-xs">{sortedVulns.length} total — click to view product exposure</span>
-                </div>
-                <div className="divide-y divide-slate-800">
-                  {sortedVulns.map((v) => {
-                    const vid = (v as { id: string }).id;
-                    return (
-                      <button key={vid} onClick={() => setSelectedVulnId(vid)}
-                        className="w-full flex items-center gap-4 px-6 py-4 hover:bg-slate-800/40 transition text-left group">
-                        <div className="min-w-0 flex-1">
-                          <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded group-hover:text-white transition">
-                            {v.vulnerabilityId as string}
-                          </span>
-                          <p className="text-white text-sm font-medium truncate group-hover:text-red-300 transition mt-1">
-                            {v.title as string}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          {(() => {
-                            const displayStatus = isVulnClosed(vid) ? 'Closed' : 'Open';
-                            return (
-                              <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[displayStatus]}`}>
-                                {displayStatus}
-                              </span>
-                            );
-                          })()}
-                          <span className="text-slate-600 group-hover:text-slate-400 transition text-sm">→</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // ── STEP 2: Product exposure for selected vulnerability ─────────────────────
+  // All vulnerabilities logged in the last 12 months for the dropdown
+  const oneYearAgo = Date.now() - 365 * 24 * 60 * 60 * 1000;
+  const dropdownVulns = sortedVulns.filter(
+    (v) => ((v.createdAt as number) ?? 0) >= oneYearAgo
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
@@ -304,32 +242,61 @@ export default function ProductsPage() {
         {/* ── Top snapshot pane ──────────────────────────────────────────────── */}
         <div className="border-b border-slate-800 bg-slate-900/50 px-8 py-6">
           <div className="max-w-6xl mx-auto">
-            {/* Back + vuln header */}
+            {/* Header with vulnerability dropdown */}
             <div className="flex items-center justify-between mb-5">
+              <div>
+                <h1 className="text-xl font-bold text-white">Products</h1>
+                <p className="text-slate-400 text-sm mt-0.5">Select a vulnerability to view product exposure</p>
+              </div>
               <div className="flex items-center gap-3">
-                <button onClick={() => setSelectedVulnId(null)}
-                  className="text-slate-400 hover:text-white transition text-sm flex items-center gap-1.5 shrink-0">
-                  ← Back
-                </button>
-                <span className="text-slate-700">|</span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                      {selectedVuln?.vulnerabilityId as string}
-                    </span>
-                    {selectedVuln?.isZeroDay && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />Zero-Day
-                      </span>
-                    )}
-                  </div>
-                  <h1 className="text-lg font-bold text-white mt-0.5 truncate">{selectedVuln?.title as string}</h1>
+                <label htmlFor="vuln-select" className="text-slate-400 text-sm font-medium shrink-0">
+                  Vulnerabilities (last 12 months)
+                </label>
+                <div className="relative">
+                  <select
+                    id="vuln-select"
+                    value={selectedVulnId ?? ''}
+                    onChange={(e) => setSelectedVulnId(e.target.value || null)}
+                    className="appearance-none bg-slate-800 border border-slate-600 text-white text-sm rounded-lg pl-4 pr-10 py-2.5 focus:outline-none focus:border-red-500 transition cursor-pointer min-w-[280px]"
+                  >
+                    <option value="">— Select a vulnerability —</option>
+                    {dropdownVulns.map((v) => {
+                      const vid = (v as { id: string }).id;
+                      const closed = isVulnClosed(vid);
+                      return (
+                        <option key={vid} value={vid}>
+                          {v.vulnerabilityId as string} — {v.title as string}{closed ? ' [Closed]' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">▼</span>
                 </div>
               </div>
             </div>
 
+            {/* Selected vuln meta badges */}
+            {selectedVuln && (
+              <div className="flex items-center gap-2 mb-5 flex-wrap">
+                <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                  {selectedVuln.vulnerabilityId as string}
+                </span>
+                {selectedVuln.isZeroDay && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />Zero-Day
+                  </span>
+                )}
+                <span className="text-white text-sm font-semibold">{selectedVuln.title as string}</span>
+              </div>
+            )}
+
             {/* Snapshot cards — scoped to this vulnerability */}
-            <div className="grid grid-cols-3 gap-4">
+            {!selectedVulnId && (
+              <div className="mt-2 text-slate-500 text-sm">
+                Choose a vulnerability from the dropdown above to view product exposure.
+              </div>
+            )}
+            <div className={`grid grid-cols-3 gap-4 ${!selectedVulnId ? 'opacity-30 pointer-events-none' : ''}`}>
               <div className="bg-slate-900 border border-red-500/20 rounded-xl p-5">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
@@ -403,6 +370,15 @@ export default function ProductsPage() {
         </div>
 
         {/* ── Product detail section ─────────────────────────────────────────── */}
+        {!selectedVulnId ? (
+          <div className="flex-1 px-8 py-6 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-4xl mb-4">🔍</div>
+              <h2 className="text-white font-semibold mb-2">No vulnerability selected</h2>
+              <p className="text-slate-400 text-sm">Use the dropdown above to select a vulnerability.</p>
+            </div>
+          </div>
+        ) : (
         <div className="flex-1 px-8 py-6">
           <div className="max-w-6xl mx-auto">
 
@@ -662,6 +638,7 @@ export default function ProductsPage() {
             )}
           </div>
         </div>
+        )}
       </main>
     </div>
   );

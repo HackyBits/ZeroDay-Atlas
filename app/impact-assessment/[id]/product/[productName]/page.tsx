@@ -17,6 +17,7 @@ type ExposureLevel  = 'Internal' | 'External' | 'Internet-facing';
 interface ProductDetailForm {
   impactStatus:   ImpactStatus;
   versionsImpacted: string[];
+  cvssScore:      string;
   businessImpact: BusinessImpact;
   dataSensitivity: DataSensitivity;
   exposureLevel:  ExposureLevel;
@@ -106,6 +107,7 @@ export default function ProductDetailPage() {
   const [form, setForm] = useState<ProductDetailForm>({
     impactStatus:    'Unknown',
     versionsImpacted: [],
+    cvssScore:       '',
     businessImpact:  'Medium',
     dataSensitivity: 'Internal',
     exposureLevel:   'Internal',
@@ -115,9 +117,11 @@ export default function ProductDetailPage() {
   useEffect(() => {
     const existing = pdData?.productAssessments?.[0];
     if (!existing) return;
+    const existingAny = existing as Record<string, unknown>;
     setForm({
       impactStatus:    (existing.impactStatus    as ImpactStatus)   ?? 'Unknown',
       versionsImpacted: (existing.versionsImpacted as string[])     ?? [],
+      cvssScore:       existingAny.cvssScore != null ? String(existingAny.cvssScore) : '',
       businessImpact:  (existing.businessImpact  as BusinessImpact) ?? 'Medium',
       dataSensitivity: (existing.dataSensitivity as DataSensitivity) ?? 'Internal',
       exposureLevel:   (existing.exposureLevel   as ExposureLevel)  ?? 'Internal',
@@ -178,6 +182,7 @@ export default function ProductDetailPage() {
           productName,
           impactStatus:     form.impactStatus,
           versionsImpacted: form.versionsImpacted,
+          cvssScore:        parseFloat(form.cvssScore) || 0,
           businessImpact:   form.businessImpact,
           dataSensitivity:  form.dataSensitivity,
           exposureLevel:    form.exposureLevel,
@@ -288,6 +293,38 @@ export default function ProductDetailPage() {
                 ) : (
                   <p className="text-slate-600 text-xs">No versions added yet.</p>
                 )}
+              </SectionCard>
+
+              {/* CVSS Score */}
+              <SectionCard title="CVSS Score" desc="NVD numeric score (0.0 – 10.0) for this vulnerability.">
+                {(() => {
+                  const n = parseFloat(form.cvssScore) || 0;
+                  const color = n >= 9 ? 'text-red-400' : n >= 7 ? 'text-orange-400' : n >= 4 ? 'text-yellow-400' : 'text-blue-400';
+                  const bar   = n >= 9 ? 'bg-red-500'   : n >= 7 ? 'bg-orange-500'   : n >= 4 ? 'bg-yellow-500'   : 'bg-blue-500';
+                  return (
+                    <>
+                      <div className="relative">
+                        <input
+                          type="number" min="0" max="10" step="0.1"
+                          value={form.cvssScore}
+                          onChange={(e) => setField('cvssScore', e.target.value)}
+                          placeholder="e.g. 9.8"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition pr-16"
+                        />
+                        {form.cvssScore && (
+                          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-lg font-bold ${color}`}>
+                            {n.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      {form.cvssScore && (
+                        <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${bar}`} style={{ width: `${(n / 10) * 100}%` }} />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </SectionCard>
 
               {/* Business Risk Factors */}

@@ -13,6 +13,15 @@ type BusinessImpact  = 'Low' | 'Medium' | 'High';
 type DataSensitivity = 'Public' | 'Internal' | 'Confidential' | 'Restricted';
 type ExposureLevel   = 'Internal' | 'External' | 'Internet-facing';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const CVSS_COLOR = (score: number) => {
+  if (score >= 9)   return 'text-red-400';
+  if (score >= 7)   return 'text-orange-400';
+  if (score >= 4)   return 'text-yellow-400';
+  return 'text-blue-400';
+};
+
 // ─── Risk engine ─────────────────────────────────────────────────────────────
 
 const BUSINESS_WEIGHT:    Record<BusinessImpact,   number> = { Low: 1, Medium: 2, High: 3 };
@@ -92,6 +101,7 @@ export default function ImpactAssessmentPage() {
 
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
+  const [cvssScore, setCvssScore] = useState('');
 
   const [products, setProducts] = useState<ProductRow[]>(
     PLANVIEW_PRODUCTS.map((p) => ({ name: p.name, impactStatus: 'Unknown' }))
@@ -121,6 +131,8 @@ export default function ImpactAssessmentPage() {
       setSubComponents(existing.subComponents as Record<string, string>);
     }
     setExternalLink((existing.externalLink as string) ?? '');
+    const existingAny = existing as Record<string, unknown>;
+    if (existingAny.cvssScore != null) setCvssScore(String(existingAny.cvssScore));
     if (existing.versionsImpacted)  setVersionsImpacted((existing.versionsImpacted as string[]) ?? []);
     if (existing.businessImpact)    setBusinessImpact((existing.businessImpact  as BusinessImpact)  ?? 'Medium');
     if (existing.dataSensitivity)   setDataSensitivity((existing.dataSensitivity as DataSensitivity) ?? 'Internal');
@@ -205,6 +217,7 @@ export default function ImpactAssessmentPage() {
           businessImpact,
           dataSensitivity,
           exposureLevel,
+          cvssScore:          parseFloat(cvssScore) || 0,
           riskScore,
           suggestedSeverity:  deriveSeverity(riskScore),
           updatedAt:          Date.now(),
@@ -538,7 +551,43 @@ export default function ImpactAssessmentPage() {
             })()}
           </div>
 
-          {/* ── Section 4: External Reference Link ── */}
+          {/* ── Section 4: CVSS Score ── */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-5">
+            <div className="mb-5">
+              <h3 className="text-white font-semibold text-sm">CVSS Score</h3>
+              <p className="text-slate-400 text-xs mt-0.5">NVD numeric score (0.0 – 10.0) for this vulnerability.</p>
+            </div>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.1"
+                value={cvssScore}
+                onChange={(e) => { setCvssScore(e.target.value); setSaved(false); }}
+                placeholder="e.g. 9.8"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition pr-16"
+              />
+              {cvssScore && (
+                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-lg font-bold ${CVSS_COLOR(parseFloat(cvssScore) || 0)}`}>
+                  {(parseFloat(cvssScore) || 0).toFixed(1)}
+                </span>
+              )}
+            </div>
+            {cvssScore && (
+              <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${(() => {
+                    const n = parseFloat(cvssScore) || 0;
+                    return n >= 9 ? 'bg-red-500' : n >= 7 ? 'bg-orange-500' : n >= 4 ? 'bg-yellow-500' : 'bg-blue-500';
+                  })()}`}
+                  style={{ width: `${((parseFloat(cvssScore) || 0) / 10) * 100}%` }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* ── Section 5: External Reference Link ── */}
           <div className={`bg-slate-900 border rounded-xl p-6 mb-8 ${isReadOnly ? 'border-slate-700/50' : 'border-slate-800'}`}>
             <div className="flex items-start justify-between mb-4">
               <div>

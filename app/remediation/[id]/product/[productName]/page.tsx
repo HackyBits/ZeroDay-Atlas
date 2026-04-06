@@ -9,7 +9,7 @@ import Sidebar from '@/app/components/Sidebar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RemPlan   = 'Patch' | 'Config Change' | 'Workaround';
+type RemPlan   = 'Patch' | 'Code Fix' | 'Package Fix' | 'Config Change' | 'Workaround';
 type RemStatus = 'In Progress' | 'Blocked' | 'Ready for Dev Review' | 'Done';
 
 interface RemForm {
@@ -83,6 +83,8 @@ export default function ProductRemediationPage() {
   const { data: triageData } = db.useQuery({ productTriages:  { $: { where: { vulnerabilityRef: vulnInstantId, productName } } } });
   const { data: remData }    = db.useQuery({ remediations:    { $: { where: { vulnerabilityRef: vulnInstantId, productName } } } });
 
+  const [resolvedAt, setResolvedAt] = useState<number | null>(null);
+
   const [form, setForm] = useState<RemForm>({
     remediationPlan:  'Patch',
     patchAvailable:   false,
@@ -104,6 +106,7 @@ export default function ProductRemediationPage() {
       remediationOwner: (existing.remediationOwner as string)    ?? '',
       status:           (existing.status           as RemStatus) ?? 'In Progress',
     });
+    setResolvedAt((existing.resolvedAt as number | null) ?? null);
     setSaved(true);
   }, [remData]);
 
@@ -134,6 +137,10 @@ export default function ProductRemediationPage() {
     setSaving(true);
     try {
       const rid = existing ? (existing as { id: string }).id : instantId();
+      // Capture resolvedAt when status first becomes Done; clear if reverted
+      const newResolvedAt = form.status === 'Done'
+        ? (resolvedAt ?? Date.now())
+        : null;
       await db.transact(
         db.tx.remediations[rid].update({
           vulnerabilityRef:  vulnInstantId,
@@ -143,10 +150,12 @@ export default function ProductRemediationPage() {
           etaForFix:         form.etaForFix,
           remediationOwner:  form.remediationOwner,
           status:            form.status,
+          resolvedAt:        newResolvedAt ?? undefined,
           updatedAt:         Date.now(),
           createdAt:         existing ? (existing.createdAt as number) : Date.now(),
         })
       );
+      setResolvedAt(newResolvedAt);
       setSaved(true);
     } finally {
       setSaving(false);
@@ -233,8 +242,8 @@ export default function ProductRemediationPage() {
 
               {/* Remediation Plan */}
               <SectionCard title="Remediation Plan" desc="How will this vulnerability be fixed?">
-                <div className="grid grid-cols-3 gap-3">
-                  {(['Patch', 'Config Change', 'Workaround'] as RemPlan[]).map((plan) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {(['Patch', 'Code Fix', 'Package Fix', 'Config Change', 'Workaround'] as RemPlan[]).map((plan) => (
                     <OptionButton key={plan} label={plan} selected={form.remediationPlan === plan}
                       activeClass="bg-orange-500/10 border-orange-500/50 text-orange-400"
                       onClick={() => set('remediationPlan', plan)} />
@@ -286,6 +295,16 @@ export default function ProductRemediationPage() {
                   {form.status === 'Done' ? 'Verification unlocked ✓' : 'Set status to Done to unlock Verification'}
                 </p>
               </div>
+
+              {/* Resolved date (shown when Done) */}
+              {form.status === 'Done' && resolvedAt && (
+                <div className="bg-green-500/5 border border-green-500/20 rounded-xl px-5 py-3 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Resolved on</span>
+                  <span className="text-xs font-medium text-green-400">
+                    {new Date(resolvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* ── Right: Status + SLA ── */}

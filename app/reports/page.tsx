@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -25,7 +24,6 @@ const PLANVIEW_PRODUCTS = [
 ];
 
 const SEVERITIES = ['Critical', 'High', 'Medium', 'Low'] as const;
-
 const SLA_DAYS: Record<string, number> = { Critical: 7, High: 30, Medium: 90, Low: 180 };
 
 const SEV_COLORS: Record<string, string> = {
@@ -65,53 +63,46 @@ const VERIFY_STATUS_BADGE: Record<string, string> = {
   "Can't Verify": 'bg-slate-700 text-slate-300 border-slate-600',
 };
 const AGE_BUCKET_STYLE: Record<string, string> = {
-  '< 30d':   'bg-green-500/10 text-green-400 border-green-500/20',
-  '30–60d':  'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  '60–90d':  'bg-orange-500/10 text-orange-400 border-orange-500/20',
-  '> 90d':   'bg-red-500/10 text-red-400 border-red-500/20',
+  '< 30d':  'bg-green-500/10 text-green-400 border-green-500/20',
+  '30–60d': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  '60–90d': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  '> 90d':  'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
-type ActiveReport =
-  | 'prod-vuln-report'
-  | 'prod-sev-status'
-  | 'prod-exec'
-  | 'vuln-products'
-  | 'vuln-sev-status'
-  | 'vuln-exec'
-  | 'metrics-mttr'
-  | 'metrics-sla'
-  | 'metrics-aging'
-  | 'metrics-trends'
-  | 'metrics-top-risk';
+// ─── Navigation types ─────────────────────────────────────────────────────────
 
-const REPORT_NAV: { group: string; items: { id: ActiveReport; label: string }[] }[] = [
-  {
-    group: 'Products',
-    items: [
-      { id: 'prod-vuln-report', label: 'Product Vulnerability Report' },
-      { id: 'prod-sev-status',  label: 'Severity & Status Breakdown' },
-      { id: 'prod-exec',        label: 'Product Exec Summary' },
-    ],
-  },
-  {
-    group: 'Vulnerabilities',
-    items: [
-      { id: 'vuln-products',    label: 'Vulnerability → Products' },
-      { id: 'vuln-sev-status',  label: 'Severity & Status Report' },
-      { id: 'vuln-exec',        label: 'Executive Summary' },
-    ],
-  },
-  {
-    group: 'Metrics',
-    items: [
-      { id: 'metrics-mttr',     label: 'MTTR by Product' },
-      { id: 'metrics-sla',      label: 'SLA Compliance' },
-      { id: 'metrics-aging',    label: 'Vulnerability Aging' },
-      { id: 'metrics-trends',   label: 'Remediation Trends' },
-      { id: 'metrics-top-risk', label: 'Top Riskiest Products' },
-    ],
-  },
-];
+type ActiveSection = 'products' | 'vulnerabilities' | 'kpis';
+type ActiveReport  =
+  | 'prod-vuln-report' | 'prod-sev-status'  | 'prod-exec'
+  | 'vuln-products'    | 'vuln-sev-status'  | 'vuln-exec'
+  | 'metrics-mttr'     | 'metrics-sla-product' | 'metrics-sla-severity'
+  | 'metrics-aging'    | 'metrics-trends'   | 'metrics-top-risk';
+
+const SECTION_LABELS: Record<ActiveSection, string> = {
+  products:       '🏢  Products',
+  vulnerabilities: '⚠  Vulnerabilities',
+  kpis:           '📊  KPIs',
+};
+const SECTION_REPORTS: Record<ActiveSection, { id: ActiveReport; label: string }[]> = {
+  products: [
+    { id: 'prod-vuln-report', label: 'Product Vulnerability Report' },
+    { id: 'prod-sev-status',  label: 'Severity & Status Breakdown' },
+    { id: 'prod-exec',        label: 'Executive Summary' },
+  ],
+  vulnerabilities: [
+    { id: 'vuln-products',   label: 'Vulnerability → Products' },
+    { id: 'vuln-sev-status', label: 'Severity & Status Report' },
+    { id: 'vuln-exec',       label: 'Executive Summary' },
+  ],
+  kpis: [
+    { id: 'metrics-mttr',         label: 'MTTR by Product' },
+    { id: 'metrics-sla-product',  label: 'SLA Compliance by Product' },
+    { id: 'metrics-sla-severity', label: 'SLA Compliance by Severity' },
+    { id: 'metrics-aging',        label: 'Open Vulnerability Aging' },
+    { id: 'metrics-trends',       label: 'Remediation Trends' },
+    { id: 'metrics-top-risk',     label: 'Top Riskiest Products' },
+  ],
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -133,11 +124,10 @@ function lastNMonthKeys(n: number): string[] {
   return keys;
 }
 function downloadCSV(rows: (string | number)[][], filename: string) {
-  const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
+  const a    = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
 function mttrColor(days: number | null): string {
@@ -153,9 +143,9 @@ function medianOf(arr: number[]): number | null {
   return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
 }
 function ageBucket(days: number): string {
-  if (days < 30)  return '< 30d';
-  if (days < 60)  return '30–60d';
-  if (days < 90)  return '60–90d';
+  if (days < 30) return '< 30d';
+  if (days < 60) return '30–60d';
+  if (days < 90) return '60–90d';
   return '> 90d';
 }
 function daysOpen(createdAt: number, resolvedAt?: number): number {
@@ -188,13 +178,8 @@ const tooltipStyle = {
   cursor: { fill: '#334155', opacity: 0.4 },
 };
 const axisProps = { tick: { fill: '#64748b', fontSize: 11 }, axisLine: false, tickLine: false };
-
 function Badge({ label, style }: { label: string; style?: string }) {
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full border ${style ?? 'bg-slate-700 text-slate-300 border-slate-600'}`}>
-      {label}
-    </span>
-  );
+  return <span className={`text-xs px-2 py-0.5 rounded-full border ${style ?? 'bg-slate-700 text-slate-300 border-slate-600'}`}>{label}</span>;
 }
 function Dash() { return <span className="text-slate-600 text-xs">—</span>; }
 function ExportBtn({ onClick }: { onClick: () => void }) {
@@ -205,6 +190,7 @@ function ExportBtn({ onClick }: { onClick: () => void }) {
     </button>
   );
 }
+
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -218,18 +204,21 @@ export default function ReportsPage() {
   const { data: ptData }     = db.useQuery({ productTriages:     {} });
   const { data: remData }    = db.useQuery({ remediations:       {} });
 
-  // Report nav state
-  const [activeReport, setActiveReport] = useState<ActiveReport>('prod-vuln-report');
+  // ── Section & report state ─────────────────────────────────────────────────
+  const [activeSection, setActiveSection] = useState<ActiveSection>('products');
+  const [activeReport,  setActiveReport]  = useState<ActiveReport>('prod-vuln-report');
+  const [openSection,   setOpenSection]   = useState<ActiveSection | null>('products');
 
-  // Per-report filter states
-  const [selProduct,    setSelProduct]    = useState(PLANVIEW_PRODUCTS[0].name);
-  const [selVulnId,     setSelVulnId]     = useState('');
+  // ── Products section filters ───────────────────────────────────────────────
+  const [pProduct,  setPProduct]  = useState(PLANVIEW_PRODUCTS[0].name);
+  const [pSeverity, setPSeverity] = useState('');
+  const [pStatus,   setPStatus]   = useState('');
 
-  // Global filter state
-  const [gDatePreset, setGDatePreset] = useState<'30' | '90' | '180' | 'ytd' | 'all'>('all');
-  const [gSeverity,   setGSeverity]   = useState('');
-  const [gStatus,     setGStatus]     = useState('');
-  const [gZeroDay,    setGZeroDay]    = useState(false);
+  // ── Vulnerabilities section filters ───────────────────────────────────────
+  const [vVulnId,   setVVulnId]   = useState('');
+  const [vSeverity, setVSeverity] = useState('');
+  const [vStatus,   setVStatus]   = useState('');
+  const [vZeroDay,  setVZeroDay]  = useState(false);
 
   useEffect(() => { if (!isLoading && !user) router.push('/'); }, [isLoading, user, router]);
 
@@ -278,74 +267,105 @@ export default function ReportsPage() {
   }
 
   const sortedVulns = [...allVulns].sort((a, b) => ((b.createdAt as number) ?? 0) - ((a.createdAt as number) ?? 0));
-  const effectiveVulnId = selVulnId || ((sortedVulns[0] as { id: string } | undefined)?.id ?? '');
 
-  // ── Global filter ──────────────────────────────────────────────────────────
+  // ── Section-specific filtered sets ────────────────────────────────────────
 
-  function getGlobalCutoff(): number {
-    const now = Date.now();
-    if (gDatePreset === '30')  return now - 30  * 86_400_000;
-    if (gDatePreset === '90')  return now - 90  * 86_400_000;
-    if (gDatePreset === '180') return now - 180 * 86_400_000;
-    if (gDatePreset === 'ytd') return new Date(new Date().getFullYear(), 0, 1).getTime();
-    return 0;
+  const ONE_YEAR_CUTOFF = Date.now() - 365 * 86_400_000;
+
+  function filterVulns(severity: string, status: string, zeroDay: boolean) {
+    return allVulns.filter(v => {
+      const vid = (v as { id: string }).id;
+      if (((v.createdAt as number) ?? 0) < ONE_YEAR_CUTOFF) return false;
+      if (severity && globalSevByVuln[vid] !== severity) return false;
+      if (status   && (v.status as string) !== status)   return false;
+      if (zeroDay  && !v.isZeroDay)                       return false;
+      return true;
+    });
   }
 
-  const cutoff = getGlobalCutoff();
-  const globallyFiltered = allVulns.filter(v => {
-    const vid = (v as { id: string }).id;
-    if (cutoff && ((v.createdAt as number) ?? 0) < cutoff) return false;
-    if (gSeverity && globalSevByVuln[vid] !== gSeverity) return false;
-    if (gStatus   && (v.status as string) !== gStatus)   return false;
-    if (gZeroDay  && !v.isZeroDay)                        return false;
-    return true;
-  });
+  const prodFiltered = filterVulns(pSeverity, pStatus, false);
+  const vulnFiltered = filterVulns(vSeverity, vStatus, vZeroDay);
+  const kpiFiltered  = filterVulns('', '', false);
 
-  const hasGlobalFilter = gDatePreset !== 'all' || gSeverity || gStatus || gZeroDay;
+  const effectiveVulnId = vVulnId || ((sortedVulns[0] as { id: string } | undefined)?.id ?? '');
 
-  // ── REPORT RENDERERS ───────────────────────────────────────────────────────
+  // ── Section switch ─────────────────────────────────────────────────────────
+  function switchSection(s: ActiveSection) {
+    if (openSection === s) {
+      setOpenSection(null);
+    } else {
+      setOpenSection(s);
+      setActiveSection(s);
+      setActiveReport(SECTION_REPORTS[s][0].id);
+    }
+  }
 
-  // ── 1: Products — Product Vulnerability Report ────────────────────────────
+  // ── SLA rows computation (shared between two SLA reports) ─────────────────
+  type SLARow = {
+    vulnId: string; vulnRef: string; title: string; product: string; sev: string | null;
+    slaDeadline: string; isResolved: boolean; isOnTime: boolean; isBreach: boolean;
+    daysToDeadline: number; status: string;
+  };
+  function computeSLARows(): SLARow[] {
+    const now = Date.now();
+    const rows: SLARow[] = [];
+    for (const pt of allPTs) {
+      if (!pt.slaDeadline) continue;
+      const vulnRef = pt.vulnerabilityRef as string;
+      const vuln    = vulnById[vulnRef];
+      if (!vuln) continue;
+      const product    = pt.productName as string;
+      const sev        = (pt.severity as string) || null;
+      const deadline   = new Date(pt.slaDeadline as string).getTime();
+      const rem        = getRem(vulnRef, product);
+      const isResolved = (rem?.status as string) === 'Done' || vuln.status === 'Remediated' || vuln.status === 'Closed';
+      const resolvedAt = isResolved ? ((rem?.updatedAt as number) ?? (vuln.remediatedAt as number) ?? now) : null;
+      const isOnTime   = isResolved && resolvedAt !== null && resolvedAt <= deadline;
+      const isBreach   = !isResolved && now > deadline;
+      const daysToDeadline = Math.round((deadline - now) / 86_400_000);
+      rows.push({
+        vulnId: (vuln.vulnerabilityId as string), vulnRef, title: (vuln.title as string),
+        product, sev, slaDeadline: pt.slaDeadline as string,
+        isResolved, isOnTime, isBreach, daysToDeadline, status: (vuln.status as string) ?? 'Open',
+      });
+    }
+    return rows;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // REPORT RENDERERS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Products: Product Vulnerability Report ────────────────────────────────
   function renderProdVulnReport() {
-    const filteredVulnIds = new Set(globallyFiltered.map(v => (v as { id: string }).id));
+    const filteredVulnIds = new Set(prodFiltered.map(v => (v as { id: string }).id));
     const rows = allPAs
       .filter(pa =>
-        (pa.productName as string) === selProduct &&
+        (pa.productName as string) === pProduct &&
         (pa.impactStatus as string) === 'Impacted' &&
         filteredVulnIds.has(pa.vulnerabilityRef as string)
       )
       .map(pa => {
-        const vulnId  = pa.vulnerabilityRef as string;
-        const vuln    = vulnById[vulnId];
-        const pt      = getPT(vulnId, selProduct);
-        const rem     = getRem(vulnId, selProduct);
-        const sev     = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? null;
-        const cvss    = (pt?.cvssScore as number) ?? null;
+        const vulnId = pa.vulnerabilityRef as string;
+        const vuln   = vulnById[vulnId];
+        const pt     = getPT(vulnId, pProduct);
+        const rem    = getRem(vulnId, pProduct);
+        const sev    = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? null;
+        const cvss   = (pt?.cvssScore as number) ?? null;
         const assignedTo = (pt?.assignedOwner as string) || null;
         const versions   = ((pa.versionsImpacted as string[]) ?? []).join(', ') || null;
         const resolved   = vuln && (vuln.status === 'Remediated' || vuln.status === 'Closed')
-          ? ((rem?.updatedAt as number) ?? (vuln.remediatedAt as number) ?? undefined)
-          : undefined;
+          ? ((rem?.updatedAt as number) ?? (vuln.remediatedAt as number) ?? undefined) : undefined;
         const days = vuln ? daysOpen(vuln.createdAt as number, resolved) : 0;
         return { vulnId, vuln, pt, rem, sev, cvss, assignedTo, versions, days };
-      })
-      .filter(r => !!r.vuln);
+      }).filter(r => !!r.vuln);
 
     function exportCSV() {
-      const csv: (string | number)[][] = [
-        ['Vuln ID','Title','CVE','Severity','CVSS','Status','Triage','Remediation','Verification','Versions','Assigned To','Days Open'],
-      ];
+      const csv: (string | number)[][] = [['Vuln ID','Title','CVE','Severity','CVSS','Status','Triage','Remediation','Verification','Versions','Assigned To','Days Open']];
       for (const r of rows) {
-        csv.push([
-          r.vuln.vulnerabilityId as string, r.vuln.title as string,
-          (r.vuln.cveId as string) ?? '—', r.sev ?? '—',
-          r.cvss ?? '—', (r.vuln.status as string) ?? 'Open',
-          (r.pt?.status as string) ?? '—', (r.rem?.status as string) ?? '—',
-          (r.rem?.verificationStatus as string) ?? '—',
-          r.versions ?? '—', r.assignedTo ?? '—', r.days,
-        ]);
+        csv.push([r.vuln.vulnerabilityId as string, r.vuln.title as string, (r.vuln.cveId as string) ?? '—', r.sev ?? '—', r.cvss ?? '—', (r.vuln.status as string) ?? 'Open', (r.pt?.status as string) ?? '—', (r.rem?.status as string) ?? '—', (r.rem?.verificationStatus as string) ?? '—', r.versions ?? '—', r.assignedTo ?? '—', r.days]);
       }
-      downloadCSV(csv, `${selProduct}-vulnerabilities.csv`);
+      downloadCSV(csv, `${pProduct}-vulnerabilities.csv`);
     }
 
     return (
@@ -353,20 +373,13 @@ export default function ReportsPage() {
         <div className="flex items-center justify-between mb-5">
           <div>
             <h2 className="text-white font-bold text-lg">Product Vulnerability Report</h2>
-            <p className="text-slate-400 text-sm mt-0.5">All vulnerabilities impacting the selected product</p>
+            <p className="text-slate-400 text-sm mt-0.5">All vulnerabilities impacting <span className="text-white font-medium">{pProduct}</span></p>
           </div>
-          <div className="flex items-center gap-3">
-            <select value={selProduct} onChange={e => setSelProduct(e.target.value)}
-              className="bg-slate-800 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-red-500 transition">
-              {PLANVIEW_PRODUCTS.map(p => <option key={p.name} value={p.name}>{p.icon} {p.name}</option>)}
-            </select>
-            <ExportBtn onClick={exportCSV} />
-          </div>
+          <ExportBtn onClick={exportCSV} />
         </div>
-
         {rows.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-            <p className="text-slate-400 text-sm">{selProduct} has no impacted vulnerabilities matching the current filters.</p>
+            <p className="text-slate-400 text-sm">{pProduct} has no impacted vulnerabilities matching the current filters.</p>
           </div>
         ) : (
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
@@ -403,24 +416,19 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 2: Products — Severity & Status Breakdown ─────────────────────────────
+  // ── Products: Severity & Status Breakdown ─────────────────────────────────
   function renderProdSevStatus() {
-    const filteredVulnIds = new Set(globallyFiltered.map(v => (v as { id: string }).id));
+    const filteredVulnIds = new Set(prodFiltered.map(v => (v as { id: string }).id));
     const rows = allPAs
-      .filter(pa =>
-        (pa.productName as string) === selProduct &&
-        (pa.impactStatus as string) === 'Impacted' &&
-        filteredVulnIds.has(pa.vulnerabilityRef as string)
-      )
+      .filter(pa => (pa.productName as string) === pProduct && (pa.impactStatus as string) === 'Impacted' && filteredVulnIds.has(pa.vulnerabilityRef as string))
       .map(pa => {
         const vulnId = pa.vulnerabilityRef as string;
         const vuln   = vulnById[vulnId];
-        const pt     = getPT(vulnId, selProduct);
-        const rem    = getRem(vulnId, selProduct);
+        const pt     = getPT(vulnId, pProduct);
+        const rem    = getRem(vulnId, pProduct);
         const sev    = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? null;
         return { vulnId, vuln, sev, rem };
-      })
-      .filter(r => !!r.vuln);
+      }).filter(r => !!r.vuln);
 
     const sevCounts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
     const statusCounts: Record<string, number> = { Open: 0, 'In Progress': 0, 'Pending Verification': 0, Remediated: 0, Closed: 0 };
@@ -433,10 +441,9 @@ export default function ReportsPage() {
       if (st === 'Remediated' || st === 'Closed') remCount++;
     }
 
-    // Trend data: 6 months, logged vs remediated for this product
     const monthKeys = lastNMonthKeys(6);
-    const loggedByMonth: Record<string, number>  = {};
-    const remByMonth:    Record<string, number>  = {};
+    const loggedByMonth: Record<string, number> = {};
+    const remByMonth:    Record<string, number> = {};
     for (const k of monthKeys) { loggedByMonth[k] = 0; remByMonth[k] = 0; }
     for (const r of rows) {
       const mk = monthKey((r.vuln.createdAt as number) ?? 0);
@@ -450,30 +457,21 @@ export default function ReportsPage() {
 
     return (
       <div>
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-white font-bold text-lg">Severity & Status Breakdown</h2>
-            <p className="text-slate-400 text-sm mt-0.5">Distribution of impacted vulnerabilities by severity and status</p>
-          </div>
-          <select value={selProduct} onChange={e => setSelProduct(e.target.value)}
-            className="bg-slate-800 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-red-500 transition">
-            {PLANVIEW_PRODUCTS.map(p => <option key={p.name} value={p.name}>{p.icon} {p.name}</option>)}
-          </select>
+        <div className="mb-5">
+          <h2 className="text-white font-bold text-lg">Severity & Status Breakdown</h2>
+          <p className="text-slate-400 text-sm mt-0.5">Distribution of impacted vulnerabilities for <span className="text-white font-medium">{pProduct}</span></p>
         </div>
-
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <KpiCard label="Impacted Vulns" value={rows.length}         color="text-white" />
-          <KpiCard label="Open"           value={openCount}           color="text-red-400" />
-          <KpiCard label="Remediated"     value={remCount}            color="text-green-400" />
-          <KpiCard label="Critical"       value={sevCounts.Critical}  color="text-red-400" />
+          <KpiCard label="Impacted Vulns" value={rows.length}        color="text-white" />
+          <KpiCard label="Open"           value={openCount}          color="text-red-400" />
+          <KpiCard label="Remediated"     value={remCount}           color="text-green-400" />
+          <KpiCard label="Critical"       value={sevCounts.Critical} color="text-red-400" />
         </div>
-
         <div className="grid grid-cols-2 gap-6 mb-6">
           <ChartCard title="Severity Distribution">
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={Object.entries(sevCounts).filter(([,n])=>n>0).map(([name,value])=>({name,value}))}
-                  cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
+                <Pie data={Object.entries(sevCounts).filter(([,n])=>n>0).map(([name,value])=>({name,value}))} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
                   {Object.entries(sevCounts).filter(([,n])=>n>0).map(([name]) => <Cell key={name} fill={SEV_COLORS[name] ?? '#64748b'} />)}
                 </Pie>
                 <Tooltip {...tooltipStyle} />
@@ -493,8 +491,7 @@ export default function ReportsPage() {
             </ResponsiveContainer>
           </ChartCard>
         </div>
-
-        <ChartCard title="Discovered vs Remediated over Time" sub={`Last 6 months — ${selProduct}`}>
+        <ChartCard title="Discovered vs Remediated over Time" sub={`Last 6 months — ${pProduct}`}>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={trendData} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -507,16 +504,12 @@ export default function ReportsPage() {
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
-
         {rows.length > 0 && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-6">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-xs">
-                  <th className="text-left px-5 py-3 font-medium">Vuln ID</th>
-                  <th className="text-left px-5 py-3 font-medium">Title</th>
-                  <th className="text-left px-5 py-3 font-medium">Severity</th>
-                  <th className="text-left px-5 py-3 font-medium">Status</th>
+                  {['Vuln ID','Title','Severity','Status'].map(h => <th key={h} className="text-left px-5 py-3 font-medium">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -536,15 +529,28 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 3: Products — Product Exec Summary ───────────────────────────────────
+  // ── Products: Executive Summary ───────────────────────────────────────────
   function renderProdExec() {
-    const filteredVulnIds = new Set(globallyFiltered.map(v => (v as { id: string }).id));
+    const filteredVulnIds = new Set(prodFiltered.map(v => (v as { id: string }).id));
+
+    // Per-selected-product KPIs
+    const selPAs = allPAs.filter(pa => (pa.productName as string) === pProduct && (pa.impactStatus as string) === 'Impacted' && filteredVulnIds.has(pa.vulnerabilityRef as string));
+    let selCrit = 0, selHigh = 0, selOpen = 0, selRem = 0;
+    for (const pa of selPAs) {
+      const vulnId = pa.vulnerabilityRef as string;
+      const vuln   = vulnById[vulnId];
+      const pt     = getPT(vulnId, pProduct);
+      const sev    = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? '';
+      if (sev === 'Critical') selCrit++;
+      if (sev === 'High')     selHigh++;
+      const st = vuln ? ((vuln.status as string) ?? 'Open') : 'Open';
+      if (st === 'Open' || st === 'In Progress') selOpen++;
+      if (st === 'Remediated' || st === 'Closed') selRem++;
+    }
+
+    // All-products table
     const productRows = PLANVIEW_PRODUCTS.map(p => {
-      const pas = allPAs.filter(pa =>
-        (pa.productName as string) === p.name &&
-        (pa.impactStatus as string) === 'Impacted' &&
-        filteredVulnIds.has(pa.vulnerabilityRef as string)
-      );
+      const pas = allPAs.filter(pa => (pa.productName as string) === p.name && (pa.impactStatus as string) === 'Impacted' && filteredVulnIds.has(pa.vulnerabilityRef as string));
       let critical = 0, high = 0, medium = 0, low = 0, open = 0, remediated = 0;
       for (const pa of pas) {
         const vulnId = pa.vulnerabilityRef as string;
@@ -565,9 +571,24 @@ export default function ReportsPage() {
     return (
       <div>
         <div className="mb-5">
-          <h2 className="text-white font-bold text-lg">Product Exec Summary</h2>
-          <p className="text-slate-400 text-sm mt-0.5">Vulnerability exposure across all products</p>
+          <h2 className="text-white font-bold text-lg">Executive Summary</h2>
+          <p className="text-slate-400 text-sm mt-0.5">Security posture for <span className="text-white font-medium">{pProduct}</span> and all products</p>
         </div>
+
+        {/* Selected product KPIs */}
+        <div className="mb-2">
+          <p className="text-slate-500 text-xs uppercase tracking-wider font-semibold mb-3">{pProduct} — snapshot</p>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <KpiCard label="Impacted Vulns" value={selPAs.length} color="text-white" />
+            <KpiCard label="Critical"       value={selCrit}       color={selCrit > 0 ? 'text-red-400' : 'text-slate-400'} />
+            <KpiCard label="High"           value={selHigh}       color={selHigh > 0 ? 'text-orange-400' : 'text-slate-400'} />
+            <KpiCard label="Open"           value={selOpen}       color={selOpen > 0 ? 'text-red-400' : 'text-slate-400'}
+              sub={selRem > 0 ? `${selRem} remediated` : undefined} />
+          </div>
+        </div>
+
+        {/* All-products table */}
+        <p className="text-slate-500 text-xs uppercase tracking-wider font-semibold mb-3">All Products Overview</p>
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -584,8 +605,14 @@ export default function ReportsPage() {
             </thead>
             <tbody>
               {productRows.map(r => (
-                <tr key={r.name} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
-                  <td className="px-5 py-3"><div className="flex items-center gap-2"><span>{r.icon}</span><span className="text-white text-xs font-medium">{r.name}</span></div></td>
+                <tr key={r.name} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition ${r.name === pProduct ? 'bg-slate-800/20' : ''}`}>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <span>{r.icon}</span>
+                      <span className={`text-xs font-medium ${r.name === pProduct ? 'text-red-300' : 'text-white'}`}>{r.name}</span>
+                      {r.name === pProduct && <span className="text-xs text-red-500/70 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">selected</span>}
+                    </div>
+                  </td>
                   <td className="px-5 py-3 text-right"><span className={`font-semibold text-sm ${r.impacted > 0 ? 'text-white' : 'text-slate-600'}`}>{r.impacted}</span></td>
                   <td className="px-5 py-3 text-right text-xs">{r.critical > 0 ? <span className="text-red-400 font-semibold">{r.critical}</span> : <span className="text-slate-600">—</span>}</td>
                   <td className="px-5 py-3 text-right text-xs">{r.high > 0 ? <span className="text-orange-400 font-semibold">{r.high}</span> : <span className="text-slate-600">—</span>}</td>
@@ -602,7 +629,7 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 4: Vulnerabilities — Vulnerability → Products ─────────────────────────
+  // ── Vulnerabilities: Vulnerability → Products ─────────────────────────────
   function renderVulnProducts() {
     const selectedVuln = effectiveVulnId ? vulnById[effectiveVulnId] : null;
     const rows = allPAs
@@ -618,9 +645,7 @@ export default function ReportsPage() {
       });
 
     function exportCSV() {
-      const csv: (string | number)[][] = [
-        ['Product','Impact','Triage Decision','Triage Severity','Versions','Assigned To','Remediation Status','Verification'],
-      ];
+      const csv: (string | number)[][] = [['Product','Impact','Triage Decision','Triage Severity','Versions','Assigned To','Remediation Status','Verification']];
       for (const r of rows) {
         csv.push([r.product,'Impacted',(r.pt?.decision as string)??'—',(r.pt?.severity as string)??'—',r.versions??'—',r.assignedTo??'—',(r.rem?.status as string)??'—',(r.rem?.verificationStatus as string)??'—']);
       }
@@ -634,19 +659,8 @@ export default function ReportsPage() {
             <h2 className="text-white font-bold text-lg">Vulnerability → Products Report</h2>
             <p className="text-slate-400 text-sm mt-0.5">All products impacted by the selected vulnerability</p>
           </div>
-          <div className="flex items-center gap-3">
-            <select value={effectiveVulnId} onChange={e => setSelVulnId(e.target.value)}
-              className="bg-slate-800 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-red-500 transition max-w-xs">
-              {sortedVulns.map(v => (
-                <option key={(v as { id: string }).id} value={(v as { id: string }).id}>
-                  {v.vulnerabilityId as string} — {(v.title as string).slice(0, 40)}
-                </option>
-              ))}
-            </select>
-            <ExportBtn onClick={exportCSV} />
-          </div>
+          <ExportBtn onClick={exportCSV} />
         </div>
-
         {selectedVuln && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-5 flex items-center gap-4 flex-wrap">
             <span className="font-mono text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded">{selectedVuln.vulnerabilityId as string}</span>
@@ -656,7 +670,6 @@ export default function ReportsPage() {
             {rows.length > 0 && <span className="text-slate-400 text-xs">{rows.length} product{rows.length !== 1 ? 's' : ''} impacted — blast radius</span>}
           </div>
         )}
-
         {rows.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <p className="text-slate-400 text-sm">No products are recorded as Impacted for this vulnerability.</p>
@@ -692,31 +705,25 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 5: Vulnerabilities — Severity & Status Report ─────────────────────────
+  // ── Vulnerabilities: Severity & Status Report ─────────────────────────────
   function renderVulnSevStatus() {
     const sevStatusData = SEVERITIES.map(sev => {
-      const sevRows = globallyFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === sev);
-      return {
-        sev,
-        Open:       sevRows.filter(v => v.status === 'Open').length,
-        'In Prog':  sevRows.filter(v => v.status === 'In Progress').length,
-        Remediated: sevRows.filter(v => v.status === 'Remediated' || v.status === 'Closed').length,
-      };
+      const sevRows = vulnFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === sev);
+      return { sev, Open: sevRows.filter(v => v.status === 'Open').length, 'In Prog': sevRows.filter(v => v.status === 'In Progress').length, Remediated: sevRows.filter(v => v.status === 'Remediated' || v.status === 'Closed').length };
     }).filter(d => d.Open + d['In Prog'] + d.Remediated > 0);
 
-    const total      = globallyFiltered.length;
-    const critical   = globallyFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === 'Critical').length;
-    const open       = globallyFiltered.filter(v => v.status === 'Open' || v.status === 'In Progress').length;
-    const remediated = globallyFiltered.filter(v => v.status === 'Remediated' || v.status === 'Closed').length;
-    const zdActive   = globallyFiltered.filter(v => v.isZeroDay && v.status !== 'Remediated' && v.status !== 'Closed').length;
+    const total      = vulnFiltered.length;
+    const critical   = vulnFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === 'Critical').length;
+    const open       = vulnFiltered.filter(v => v.status === 'Open' || v.status === 'In Progress').length;
+    const remediated = vulnFiltered.filter(v => v.status === 'Remediated' || v.status === 'Closed').length;
+    const zdActive   = vulnFiltered.filter(v => v.isZeroDay && v.status !== 'Remediated' && v.status !== 'Closed').length;
 
     return (
       <div>
         <div className="mb-5">
           <h2 className="text-white font-bold text-lg">Severity & Status Report</h2>
-          <p className="text-slate-400 text-sm mt-0.5">Cross-cutting view — use global filters to narrow</p>
+          <p className="text-slate-400 text-sm mt-0.5">Cross-cutting view across all vulnerabilities</p>
         </div>
-
         <div className="grid grid-cols-5 gap-4 mb-6">
           <KpiCard label="Total"        value={total}      color="text-white" />
           <KpiCard label="Critical"     value={critical}   color="text-red-400" />
@@ -724,7 +731,6 @@ export default function ReportsPage() {
           <KpiCard label="Remediated"   value={remediated} color="text-green-400" />
           <KpiCard label="Active 0-Day" value={zdActive}   color="text-red-400" />
         </div>
-
         {sevStatusData.length > 0 && (
           <ChartCard title="Severity × Status" sub="Stacked by Open / In Progress / Remediated">
             <ResponsiveContainer width="100%" height={200}>
@@ -733,14 +739,13 @@ export default function ReportsPage() {
                 <XAxis dataKey="sev" {...axisProps} />
                 <YAxis {...axisProps} allowDecimals={false} />
                 <Tooltip {...tooltipStyle} />
-                <Bar dataKey="Open"       fill="#ef4444" radius={[0,0,0,0]} stackId="a" />
-                <Bar dataKey="In Prog"    fill="#f97316" radius={[0,0,0,0]} stackId="a" />
+                <Bar dataKey="Open"       fill="#ef4444" stackId="a" />
+                <Bar dataKey="In Prog"    fill="#f97316" stackId="a" />
                 <Bar dataKey="Remediated" fill="#22c55e" radius={[2,2,0,0]} stackId="a" />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         )}
-
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mt-6">
           <table className="w-full text-sm min-w-[700px]">
             <thead>
@@ -751,7 +756,7 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {[...globallyFiltered].sort((a,b) => ((b.createdAt as number)??0) - ((a.createdAt as number)??0)).map(v => {
+              {[...vulnFiltered].sort((a,b) => ((b.createdAt as number)??0) - ((a.createdAt as number)??0)).map(v => {
                 const vid = (v as { id: string }).id;
                 const sev = globalSevByVuln[vid];
                 const isResolved = v.status === 'Remediated' || v.status === 'Closed';
@@ -778,15 +783,15 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 6: Vulnerabilities — Executive Summary ────────────────────────────────
+  // ── Vulnerabilities: Executive Summary ────────────────────────────────────
   function renderVulnExec() {
-    const total     = globallyFiltered.length;
-    const openCrit  = globallyFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === 'Critical' && (v.status === 'Open' || v.status === 'In Progress')).length;
-    const zdActive  = globallyFiltered.filter(v => v.isZeroDay && v.status !== 'Remediated' && v.status !== 'Closed').length;
+    const total    = vulnFiltered.length;
+    const openCrit = vulnFiltered.filter(v => globalSevByVuln[(v as { id: string }).id] === 'Critical' && (v.status === 'Open' || v.status === 'In Progress')).length;
+    const zdActive = vulnFiltered.filter(v => v.isZeroDay && v.status !== 'Remediated' && v.status !== 'Closed').length;
 
     const riskScores: number[] = [];
     for (const a of allPAs) { if (a.riskScore != null) riskScores.push(a.riskScore as number); }
-    const avgRisk = riskScores.length > 0 ? Math.round(riskScores.reduce((a,b) => a+b, 0) / riskScores.length) : null;
+    const avgRisk = riskScores.length > 0 ? Math.round(riskScores.reduce((a,b)=>a+b,0)/riskScores.length) : null;
 
     let slaTotal = 0, slaOnTime = 0;
     for (const pt of allPTs) {
@@ -804,16 +809,16 @@ export default function ReportsPage() {
     const slaPct = slaTotal > 0 ? Math.round((slaOnTime / slaTotal) * 100) : null;
 
     const sevCounts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-    for (const v of globallyFiltered) {
+    for (const v of vulnFiltered) {
       const sev = globalSevByVuln[(v as { id: string }).id];
       if (sev && sev in sevCounts) sevCounts[sev]++;
     }
     const sevPie = Object.entries(sevCounts).filter(([,n])=>n>0).map(([name,value])=>({name,value}));
 
-    const monthKeys = lastNMonthKeys(6);
+    const monthKeys = lastNMonthKeys(12);
     const byMonth: Record<string,number> = {};
     for (const k of monthKeys) byMonth[k] = 0;
-    for (const v of globallyFiltered) {
+    for (const v of vulnFiltered) {
       const mk = monthKey((v.createdAt as number) ?? 0);
       if (mk in byMonth) byMonth[mk]++;
     }
@@ -828,13 +833,13 @@ export default function ReportsPage() {
       <div>
         <div className="mb-5">
           <h2 className="text-white font-bold text-lg">Executive Summary</h2>
-          <p className="text-slate-400 text-sm mt-0.5">One-page security posture overview</p>
+          <p className="text-slate-400 text-sm mt-0.5">One-page security posture overview — use filters to narrow time range</p>
         </div>
         <div className="grid grid-cols-5 gap-4 mb-6">
-          <KpiCard label="Total Vulns"      value={total}                   color="text-white" />
-          <KpiCard label="Open Critical"    value={openCrit}                color="text-red-400" />
-          <KpiCard label="Active Zero-Days" value={zdActive}                color="text-red-400" />
-          <KpiCard label="Avg Risk Score"   value={avgRisk ?? '—'}          color={avgRisk != null && avgRisk >= 76 ? 'text-red-400' : avgRisk != null && avgRisk >= 51 ? 'text-orange-400' : 'text-yellow-400'} />
+          <KpiCard label="Total Vulns"      value={total}                        color="text-white" />
+          <KpiCard label="Open Critical"    value={openCrit}                     color="text-red-400" />
+          <KpiCard label="Active Zero-Days" value={zdActive}                     color="text-red-400" />
+          <KpiCard label="Avg Risk Score"   value={avgRisk ?? '—'}               color={avgRisk != null && avgRisk >= 76 ? 'text-red-400' : avgRisk != null && avgRisk >= 51 ? 'text-orange-400' : 'text-yellow-400'} />
           <KpiCard label="SLA Compliance"   value={slaPct != null ? `${slaPct}%` : '—'} color={slaPct != null && slaPct >= 80 ? 'text-green-400' : 'text-red-400'} sub={slaTotal > 0 ? `${slaOnTime}/${slaTotal} on time` : undefined} />
         </div>
         <div className="grid grid-cols-2 gap-6 mb-6">
@@ -849,7 +854,7 @@ export default function ReportsPage() {
               </PieChart>
             </ResponsiveContainer>
           </ChartCard>
-          <ChartCard title="Monthly Vulnerability Intake" sub="Last 6 months">
+          <ChartCard title="Monthly Vulnerability Intake" sub={`Last ${monthKeys.length} months`}>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={monthData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -879,10 +884,9 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 7: Metrics — MTTR by Product (enhanced) ───────────────────────────────
+  // ── KPI: MTTR by Product ──────────────────────────────────────────────────
   function renderMetricsMTTR() {
     type MRow = { name: string; icon: string; overall: number | null; median: number | null; min: number | null; max: number | null; bySev: Record<string, number | null>; count: number };
-
     const rows: MRow[] = PLANVIEW_PRODUCTS.map(p => {
       const allDays: number[] = [];
       const bySevDays: Record<string, number[]> = { Critical: [], High: [], Medium: [], Low: [] };
@@ -895,7 +899,8 @@ export default function ReportsPage() {
         const pt  = getPT(vulnId, p.name);
         const sev = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? '';
         const created  = (vuln.createdAt as number) ?? 0;
-        const resolved = (rem.updatedAt as number) ?? 0;
+        // Prefer resolvedAt (set when status first became Done); fall back to updatedAt for older records
+        const resolved = (rem.resolvedAt as number | undefined) ?? (rem.updatedAt as number) ?? 0;
         if (!created || resolved <= created) continue;
         const d = (resolved - created) / 86_400_000;
         allDays.push(d);
@@ -905,10 +910,10 @@ export default function ReportsPage() {
       return {
         name: p.name, icon: p.icon,
         overall: avg(allDays),
-        median:  medianOf(allDays) !== null ? Math.round(medianOf(allDays)! * 10) / 10 : null,
-        min:     allDays.length ? Math.round(Math.min(...allDays) * 10)/10 : null,
-        max:     allDays.length ? Math.round(Math.max(...allDays) * 10)/10 : null,
-        bySev: { Critical: avg(bySevDays.Critical), High: avg(bySevDays.High), Medium: avg(bySevDays.Medium), Low: avg(bySevDays.Low) },
+        median:  medianOf(allDays) !== null ? Math.round(medianOf(allDays)! * 10)/10 : null,
+        min:     allDays.length ? Math.round(Math.min(...allDays)*10)/10 : null,
+        max:     allDays.length ? Math.round(Math.max(...allDays)*10)/10 : null,
+        bySev:   { Critical: avg(bySevDays.Critical), High: avg(bySevDays.High), Medium: avg(bySevDays.Medium), Low: avg(bySevDays.Low) },
         count:   allDays.length,
       };
     }).sort((a,b) => (b.overall ?? -1) - (a.overall ?? -1));
@@ -916,7 +921,6 @@ export default function ReportsPage() {
     let totalSum = 0, totalCount = 0;
     for (const r of rows) { if (r.overall !== null) { totalSum += r.overall * r.count; totalCount += r.count; } }
     const overallMTTR = totalCount > 0 ? (totalSum / totalCount).toFixed(1) : null;
-
     const chartData = rows.filter(r => r.overall !== null).map(r => ({ name: r.name, 'Avg Days': r.overall as number }));
 
     return (
@@ -926,9 +930,9 @@ export default function ReportsPage() {
           <p className="text-slate-400 text-sm mt-0.5">Mean time to remediate — logged to Done, by product and severity</p>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-6">
-          <KpiCard label="Overall MTTR"      value={overallMTTR ? `${overallMTTR}d` : '—'} color={mttrColor(overallMTTR ? parseFloat(overallMTTR) : null)} sub="Across all products" />
-          <KpiCard label="Products Tracked"  value={rows.filter(r=>r.overall!==null).length} color="text-white" />
-          <KpiCard label="Total Remediated"  value={totalCount} color="text-green-400" sub="Vulns with remediation Done" />
+          <KpiCard label="Overall MTTR"     value={overallMTTR ? `${overallMTTR}d` : '—'} color={mttrColor(overallMTTR ? parseFloat(overallMTTR) : null)} sub="Across all products" />
+          <KpiCard label="Products Tracked" value={rows.filter(r=>r.overall!==null).length} color="text-white" />
+          <KpiCard label="Total Remediated" value={totalCount} color="text-green-400" sub="Vulns with remediation Done" />
         </div>
         {chartData.length > 0 && (
           <ChartCard title="Average Days to Remediate by Product" sub="Sorted by longest first">
@@ -988,36 +992,153 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 8: Metrics — SLA Compliance (NEW) ────────────────────────────────────
-  function renderMetricsSLA() {
+  // ── KPI: SLA Compliance by Product ───────────────────────────────────────
+  function renderMetricsSLAProduct() {
+    const slaRows = computeSLARows();
     const now = Date.now();
-    type SLARow = {
-      vulnId: string; vulnRef: string; title: string; product: string; sev: string | null;
-      slaDeadline: string; isResolved: boolean; isOnTime: boolean; isBreach: boolean;
-      daysToDeadline: number; status: string;
-    };
-    const slaRows: SLARow[] = [];
-    for (const pt of allPTs) {
-      if (!pt.slaDeadline) continue;
-      const vulnRef = pt.vulnerabilityRef as string;
-      const vuln    = vulnById[vulnRef];
-      if (!vuln) continue;
-      const product    = pt.productName as string;
-      const sev        = (pt.severity as string) || null;
-      const deadline   = new Date(pt.slaDeadline as string).getTime();
-      const rem        = getRem(vulnRef, product);
-      const isResolved = (rem?.status as string) === 'Done' || vuln.status === 'Remediated' || vuln.status === 'Closed';
-      const resolvedAt = isResolved ? ((rem?.updatedAt as number) ?? (vuln.remediatedAt as number) ?? now) : null;
-      const isOnTime   = isResolved && resolvedAt !== null && resolvedAt <= deadline;
-      const isBreach   = !isResolved && now > deadline;
-      const daysToDeadline = Math.round((deadline - now) / 86_400_000);
-      slaRows.push({
-        vulnId: (vuln.vulnerabilityId as string),
-        vulnRef, title: (vuln.title as string), product, sev,
-        slaDeadline: pt.slaDeadline as string, isResolved, isOnTime, isBreach,
-        daysToDeadline, status: (vuln.status as string) ?? 'Open',
-      });
+
+    // Group by product
+    const byProduct: Record<string, { total: number; onTime: number; breaches: number; pending: number }> = {};
+    for (const p of PLANVIEW_PRODUCTS) byProduct[p.name] = { total: 0, onTime: 0, breaches: 0, pending: 0 };
+    for (const r of slaRows) {
+      const pb = byProduct[r.product];
+      if (!pb) continue;
+      pb.total++;
+      if (r.isOnTime) pb.onTime++;
+      else if (r.isBreach) pb.breaches++;
+      else pb.pending++;
     }
+
+    const productRows = PLANVIEW_PRODUCTS.map(p => {
+      const d    = byProduct[p.name];
+      const pct  = d.total > 0 ? Math.round((d.onTime / d.total) * 100) : null;
+      return { ...p, ...d, pct };
+    }).filter(r => r.total > 0).sort((a, b) => (a.pct ?? 101) - (b.pct ?? 101));
+
+    const overallTotal     = slaRows.length;
+    const overallCompliant = slaRows.filter(r => r.isOnTime).length;
+    const overallBreaches  = slaRows.filter(r => r.isBreach).length;
+    const overallPct       = overallTotal > 0 ? Math.round((overallCompliant / overallTotal) * 100) : null;
+
+    const worstProduct = productRows[0];
+    const chartData = [...productRows].sort((a,b) => (a.pct ?? 0) - (b.pct ?? 0))
+      .map(r => ({ name: r.name, 'Compliance %': r.pct ?? 0 }));
+
+    function exportCSV() {
+      const csv: (string | number)[][] = [['Product','Total Tracked','Compliant','Breaches','Pending','Compliance %']];
+      for (const r of productRows) csv.push([r.name, r.total, r.onTime, r.breaches, r.pending, r.pct ?? 0]);
+      downloadCSV(csv, 'sla-by-product.csv');
+    }
+
+    // Breach detail rows for the selected product (if any) — show all breaches
+    const breachRows = slaRows.filter(r => r.isBreach || r.isOnTime).sort((a,b) => a.daysToDeadline - b.daysToDeadline);
+
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-white font-bold text-lg">SLA Compliance by Product</h2>
+            <p className="text-slate-400 text-sm mt-0.5">SLA thresholds — Critical: {SLA_DAYS.Critical}d · High: {SLA_DAYS.High}d · Medium: {SLA_DAYS.Medium}d · Low: {SLA_DAYS.Low}d</p>
+          </div>
+          <ExportBtn onClick={exportCSV} />
+        </div>
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <KpiCard label="Overall Compliance" value={overallPct !== null ? `${overallPct}%` : '—'} color={overallPct !== null && overallPct >= 80 ? 'text-green-400' : 'text-red-400'} sub={`${overallCompliant}/${overallTotal} on time`} />
+          <KpiCard label="Total SLA Breaches" value={overallBreaches} color={overallBreaches > 0 ? 'text-red-400' : 'text-slate-400'} />
+          <KpiCard label="Worst Product" value={worstProduct?.name ?? '—'} color="text-orange-400" sub={worstProduct ? `${worstProduct.pct ?? 0}% compliance` : undefined} />
+        </div>
+
+        {chartData.length > 0 && (
+          <ChartCard title="Compliance % by Product" sub="Sorted worst to best — green ≥ 80%">
+            <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>
+              <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 50, left: 70, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+                <XAxis type="number" {...axisProps} domain={[0,100]} tickFormatter={v => `${v}%`} />
+                <YAxis type="category" dataKey="name" {...axisProps} width={90} />
+                <Tooltip {...tooltipStyle} formatter={(v: unknown) => [`${v}%`, 'Compliance']} />
+                <Bar dataKey="Compliance %" radius={[0,4,4,0]}>
+                  {chartData.map(e => <Cell key={e.name} fill={e['Compliance %'] >= 80 ? '#22c55e' : e['Compliance %'] >= 50 ? '#eab308' : '#ef4444'} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Product summary table */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-6">
+          <div className="px-5 py-4 border-b border-slate-800"><h3 className="text-white font-semibold text-sm">Per-Product Summary</h3></div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 text-xs">
+                <th className="text-left px-5 py-3 font-medium">Product</th>
+                <th className="text-right px-5 py-3 font-medium">Tracked</th>
+                <th className="text-right px-5 py-3 font-medium text-green-400">Compliant</th>
+                <th className="text-right px-5 py-3 font-medium text-red-400">Breaches</th>
+                <th className="text-right px-5 py-3 font-medium text-slate-400">Pending</th>
+                <th className="text-right px-5 py-3 font-medium">Compliance %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productRows.map(r => (
+                <tr key={r.name} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
+                  <td className="px-5 py-3"><div className="flex items-center gap-2"><span>{r.icon}</span><span className="text-white text-xs font-medium">{r.name}</span></div></td>
+                  <td className="px-5 py-3 text-right text-xs text-white">{r.total}</td>
+                  <td className="px-5 py-3 text-right text-xs text-green-400 font-medium">{r.onTime}</td>
+                  <td className="px-5 py-3 text-right text-xs">{r.breaches > 0 ? <span className="text-red-400 font-semibold">{r.breaches}</span> : <span className="text-slate-600">—</span>}</td>
+                  <td className="px-5 py-3 text-right text-xs text-slate-400">{r.pending > 0 ? r.pending : <span className="text-slate-600">—</span>}</td>
+                  <td className={`px-5 py-3 text-right text-sm font-semibold ${r.pct !== null && r.pct >= 80 ? 'text-green-400' : r.pct !== null && r.pct >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                    {r.pct !== null ? `${r.pct}%` : <span className="text-slate-600 font-normal text-xs">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Breach detail */}
+        {breachRows.length > 0 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mt-6">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="text-white font-semibold text-sm">Breach & Compliance Detail</h3>
+              <span className="text-xs text-slate-500">{breachRows.length} records</span>
+            </div>
+            <table className="w-full text-sm min-w-[700px]">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 text-xs">
+                  {['Vuln ID','Title','Product','Severity','SLA Deadline','Days','Result'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {breachRows.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
+                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{r.vulnId}</td>
+                    <td className="px-4 py-3 text-white text-xs max-w-[140px] truncate">{r.title}</td>
+                    <td className="px-4 py-3 text-xs text-slate-400">{r.product}</td>
+                    <td className="px-4 py-3">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
+                    <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{r.slaDeadline}</td>
+                    <td className={`px-4 py-3 text-xs font-medium ${r.isBreach ? 'text-red-400' : r.daysToDeadline < 7 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                      {r.isBreach ? `${Math.abs(r.daysToDeadline)}d overdue` : r.daysToDeadline >= 0 ? `${r.daysToDeadline}d left` : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.isOnTime ? <Badge label="Compliant" style="bg-green-500/10 text-green-400 border-green-500/20" />
+                        : r.isBreach ? <Badge label="Breach" style="bg-red-500/10 text-red-400 border-red-500/20" />
+                        : <Badge label="Pending" style="bg-slate-700 text-slate-300 border-slate-600" />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* Suppress unused var warning */}
+        {now > 0 && null}
+      </div>
+    );
+  }
+
+  // ── KPI: SLA Compliance by Severity ──────────────────────────────────────
+  function renderMetricsSLASeverity() {
+    const slaRows = computeSLARows();
 
     const total     = slaRows.length;
     const compliant = slaRows.filter(r => r.isOnTime).length;
@@ -1027,8 +1148,8 @@ export default function ReportsPage() {
 
     const compliancePie = [
       { name: 'Compliant', value: compliant },
-      { name: 'Breached',  value: breaches },
-      { name: 'Pending',   value: pending },
+      { name: 'Breached',  value: breaches  },
+      { name: 'Pending',   value: pending   },
     ].filter(d => d.value > 0);
     const pieColors: Record<string, string> = { Compliant: '#22c55e', Breached: '#ef4444', Pending: '#64748b' };
 
@@ -1040,31 +1161,47 @@ export default function ReportsPage() {
 
     function exportCSV() {
       const csv: (string | number)[][] = [['Vuln ID','Title','Product','Severity','SLA Deadline','Status','Days to Deadline','Compliant']];
-      for (const r of slaRows) {
-        csv.push([r.vulnId, r.title, r.product, r.sev ?? '—', r.slaDeadline, r.status, r.daysToDeadline, r.isOnTime ? 'Yes' : r.isBreach ? 'Breach' : 'Pending']);
-      }
-      downloadCSV(csv, 'sla-compliance.csv');
+      for (const r of slaRows) csv.push([r.vulnId, r.title, r.product, r.sev ?? '—', r.slaDeadline, r.status, r.daysToDeadline, r.isOnTime ? 'Yes' : r.isBreach ? 'Breach' : 'Pending']);
+      downloadCSV(csv, 'sla-by-severity.csv');
     }
 
     return (
       <div>
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-white font-bold text-lg">SLA Compliance</h2>
-            <p className="text-slate-400 text-sm mt-0.5">SLA thresholds — Critical: {SLA_DAYS.Critical}d | High: {SLA_DAYS.High}d | Medium: {SLA_DAYS.Medium}d | Low: {SLA_DAYS.Low}d</p>
+            <h2 className="text-white font-bold text-lg">SLA Compliance by Severity</h2>
+            <p className="text-slate-400 text-sm mt-0.5">
+              Thresholds — Critical: {SLA_DAYS.Critical}d · High: {SLA_DAYS.High}d · Medium: {SLA_DAYS.Medium}d · Low: {SLA_DAYS.Low}d
+            </p>
           </div>
           <ExportBtn onClick={exportCSV} />
         </div>
-
         <div className="grid grid-cols-4 gap-4 mb-6">
           <KpiCard label="Overall Compliance" value={compPct !== null ? `${compPct}%` : '—'} color={compPct !== null && compPct >= 80 ? 'text-green-400' : 'text-red-400'} />
           <KpiCard label="Total Tracked"      value={total}     color="text-white" />
-          <KpiCard label="Compliant"           value={compliant} color="text-green-400" />
-          <KpiCard label="SLA Breaches"        value={breaches}  color={breaches > 0 ? 'text-red-400' : 'text-slate-400'} />
+          <KpiCard label="Compliant"          value={compliant} color="text-green-400" />
+          <KpiCard label="SLA Breaches"       value={breaches}  color={breaches > 0 ? 'text-red-400' : 'text-slate-400'} />
+        </div>
+
+        {/* Per-severity summary cards */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {Object.entries(slaBySev).filter(([,d])=>d.total>0).map(([sev, d]) => {
+            const pct = Math.round((d.onTime / d.total) * 100);
+            return (
+              <div key={sev} className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge label={sev} style={SEV_BADGE[sev]} />
+                  <span className="text-slate-500 text-xs">SLA: {SLA_DAYS[sev]}d</span>
+                </div>
+                <p className={`text-xl font-bold ${pct >= 80 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{pct}%</p>
+                <p className="text-slate-500 text-xs mt-0.5">{d.onTime}/{d.total} on time</p>
+              </div>
+            );
+          })}
         </div>
 
         <div className="grid grid-cols-2 gap-6 mb-6">
-          <ChartCard title="Compliance Status">
+          <ChartCard title="Overall Compliance Status">
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={compliancePie} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
@@ -1095,13 +1232,11 @@ export default function ReportsPage() {
             <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-xs">
-                  {['Vuln ID','Title','Product','Severity','SLA Deadline','Status','Days','Result'].map(h => (
-                    <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>
-                  ))}
+                  {['Vuln ID','Title','Product','Severity','SLA Deadline','Status','Days','Result'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {[...slaRows].sort((a,b) => a.daysToDeadline - b.daysToDeadline).map((r, i) => (
+                {[...slaRows].sort((a,b) => a.daysToDeadline - b.daysToDeadline).map((r,i) => (
                   <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
                     <td className="px-4 py-3 font-mono text-xs text-slate-400">{r.vulnId}</td>
                     <td className="px-4 py-3 text-white text-xs max-w-[140px] truncate">{r.title}</td>
@@ -1127,9 +1262,9 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 9: Metrics — Vulnerability Aging (NEW) ────────────────────────────────
+  // ── KPI: Open Vulnerability Aging ─────────────────────────────────────────
   function renderMetricsAging() {
-    const openVulns = globallyFiltered.filter(v => v.status !== 'Remediated' && v.status !== 'Closed');
+    const openVulns = kpiFiltered.filter(v => v.status !== 'Remediated' && v.status !== 'Closed');
     const BUCKETS = ['< 30d', '30–60d', '60–90d', '> 90d'] as const;
     const BUCKET_COLORS: Record<string, string> = { '< 30d': '#22c55e', '30–60d': '#eab308', '60–90d': '#f97316', '> 90d': '#ef4444' };
 
@@ -1138,7 +1273,6 @@ export default function ReportsPage() {
     const gt60  = openVulns.filter(v => daysOpen(v.createdAt as number) > 60).length;
     const gt90  = openVulns.filter(v => daysOpen(v.createdAt as number) > 90).length;
 
-    // By product stacked bar
     const productChartData = PLANVIEW_PRODUCTS.map(p => {
       const row: Record<string, number | string> = { name: p.name };
       for (const b of BUCKETS) row[b] = 0;
@@ -1146,23 +1280,19 @@ export default function ReportsPage() {
       for (const pa of pas) {
         const vuln = vulnById[pa.vulnerabilityRef as string];
         if (!vuln || vuln.status === 'Remediated' || vuln.status === 'Closed') continue;
-        // Check if in globally filtered
         if (!openVulns.find(v => (v as { id: string }).id === (pa.vulnerabilityRef as string))) continue;
         const d = daysOpen(vuln.createdAt as number);
-        const b = ageBucket(d);
-        (row[b] as number)++;
+        (row[ageBucket(d)] as number)++;
       }
       return row;
     }).filter(r => BUCKETS.some(b => (r[b] as number) > 0));
 
-    // By severity stacked bar
     const sevChartData = SEVERITIES.map(sev => {
       const row: Record<string, number | string> = { name: sev };
       for (const b of BUCKETS) row[b] = 0;
       for (const v of openVulns) {
         if (globalSevByVuln[(v as { id: string }).id] !== sev) continue;
-        const d = daysOpen(v.createdAt as number);
-        (row[ageBucket(d)] as number)++;
+        (row[ageBucket(daysOpen(v.createdAt as number))] as number)++;
       }
       return row;
     }).filter(r => BUCKETS.some(b => (r[b] as number) > 0));
@@ -1172,23 +1302,21 @@ export default function ReportsPage() {
       .map(v => {
         const vid  = (v as { id: string }).id;
         const days = daysOpen(v.createdAt as number);
-        const sev  = globalSevByVuln[vid];
-        return { v, vid, days, sev, bucket: ageBucket(days), impactedCount: (impactedProductsByVuln[vid] ?? []).length };
+        return { v, vid, days, sev: globalSevByVuln[vid], bucket: ageBucket(days), impactedCount: (impactedProductsByVuln[vid] ?? []).length };
       });
 
     return (
       <div>
         <div className="mb-5">
-          <h2 className="text-white font-bold text-lg">Vulnerability Aging</h2>
+          <h2 className="text-white font-bold text-lg">Open Vulnerability Aging</h2>
           <p className="text-slate-400 text-sm mt-0.5">How long open vulnerabilities have been unresolved</p>
         </div>
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <KpiCard label="Total Open"  value={total} color="text-white" />
-          <KpiCard label="> 30 days"   value={gt30}  color={gt30  > 0 ? 'text-yellow-400' : 'text-slate-400'} />
-          <KpiCard label="> 60 days"   value={gt60}  color={gt60  > 0 ? 'text-orange-400' : 'text-slate-400'} />
-          <KpiCard label="> 90 days"   value={gt90}  color={gt90  > 0 ? 'text-red-400'    : 'text-slate-400'} />
+          <KpiCard label="Total Open" value={total} color="text-white" />
+          <KpiCard label="> 30 days"  value={gt30}  color={gt30  > 0 ? 'text-yellow-400' : 'text-slate-400'} />
+          <KpiCard label="> 60 days"  value={gt60}  color={gt60  > 0 ? 'text-orange-400' : 'text-slate-400'} />
+          <KpiCard label="> 90 days"  value={gt90}  color={gt90  > 0 ? 'text-red-400'    : 'text-slate-400'} />
         </div>
-
         <div className="grid grid-cols-2 gap-6 mb-6">
           {productChartData.length > 0 && (
             <ChartCard title="Age Buckets by Product" sub="Open vulnerabilities only">
@@ -1218,15 +1346,12 @@ export default function ReportsPage() {
             </ChartCard>
           )}
         </div>
-
         {tableRows.length > 0 && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-xs">
-                  {['Vuln ID','Title','Severity','Status','Products Impacted','Days Open','Age Bucket'].map(h => (
-                    <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>
-                  ))}
+                  {['Vuln ID','Title','Severity','Status','Products Impacted','Days Open','Age Bucket'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -1249,15 +1374,15 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 10: Metrics — Remediation Trends (NEW) ────────────────────────────────
+  // ── KPI: Remediation Trends ───────────────────────────────────────────────
   function renderMetricsTrends() {
     const monthKeys = lastNMonthKeys(12);
-    const newByMonth: Record<string,number>  = {};
-    const remByMonth: Record<string,number>  = {};
+    const newByMonth:  Record<string, number>   = {};
+    const remByMonth:  Record<string, number>   = {};
     const mttrByMonth: Record<string, number[]> = {};
     for (const k of monthKeys) { newByMonth[k] = 0; remByMonth[k] = 0; mttrByMonth[k] = []; }
 
-    for (const v of globallyFiltered) {
+    for (const v of kpiFiltered) {
       const mk = monthKey((v.createdAt as number) ?? 0);
       if (mk in newByMonth) newByMonth[mk]++;
     }
@@ -1273,25 +1398,18 @@ export default function ReportsPage() {
       }
     }
 
-    const trendData = monthKeys.map(k => ({
-      month: monthLabel(k),
-      New:         newByMonth[k],
-      Remediated:  remByMonth[k],
-    }));
+    const trendData  = monthKeys.map(k => ({ month: monthLabel(k), New: newByMonth[k], Remediated: remByMonth[k] }));
     const mttrTrendData = monthKeys.map(k => ({
       month: monthLabel(k),
-      'MTTR (days)': mttrByMonth[k].length > 0
-        ? Math.round(mttrByMonth[k].reduce((a,b)=>a+b,0) / mttrByMonth[k].length * 10) / 10
-        : null,
+      'MTTR (days)': mttrByMonth[k].length > 0 ? Math.round(mttrByMonth[k].reduce((a,b)=>a+b,0)/mttrByMonth[k].length * 10)/10 : null,
     }));
 
     const now = new Date();
     const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const newThisMonth = newByMonth[thisMonthKey] ?? 0;
-    const remThisMonth = remByMonth[thisMonthKey] ?? 0;
+    const newThisMonth  = newByMonth[thisMonthKey] ?? 0;
+    const remThisMonth  = remByMonth[thisMonthKey] ?? 0;
     const mttrThisMonth = mttrByMonth[thisMonthKey]?.length > 0
-      ? Math.round(mttrByMonth[thisMonthKey].reduce((a,b)=>a+b,0)/mttrByMonth[thisMonthKey].length * 10)/10
-      : null;
+      ? Math.round(mttrByMonth[thisMonthKey].reduce((a,b)=>a+b,0)/mttrByMonth[thisMonthKey].length*10)/10 : null;
     const netChange = remThisMonth - newThisMonth;
 
     return (
@@ -1301,12 +1419,11 @@ export default function ReportsPage() {
           <p className="text-slate-400 text-sm mt-0.5">New vulnerabilities vs remediations over the last 12 months</p>
         </div>
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <KpiCard label="New This Month"        value={newThisMonth}                     color="text-white" />
-          <KpiCard label="Remediated This Month" value={remThisMonth}                     color="text-green-400" />
+          <KpiCard label="New This Month"        value={newThisMonth}  color="text-white" />
+          <KpiCard label="Remediated This Month" value={remThisMonth}  color="text-green-400" />
           <KpiCard label="Net Change"            value={netChange >= 0 ? `+${netChange}` : `${netChange}`} color={netChange <= 0 ? 'text-green-400' : 'text-red-400'} sub={netChange <= 0 ? 'Reducing backlog' : 'Backlog growing'} />
           <KpiCard label="Monthly MTTR"          value={mttrThisMonth ? `${mttrThisMonth}d` : '—'} color={mttrColor(mttrThisMonth)} />
         </div>
-
         <ChartCard title="New vs Remediated over Time" sub="Last 12 months">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trendData} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
@@ -1320,7 +1437,6 @@ export default function ReportsPage() {
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
-
         <div className="mt-6">
           <ChartCard title="Monthly MTTR Trend" sub="Average days to remediate per month">
             <ResponsiveContainer width="100%" height={200}>
@@ -1338,10 +1454,9 @@ export default function ReportsPage() {
     );
   }
 
-  // ── 11: Metrics — Top Riskiest Products (NEW) ─────────────────────────────
+  // ── KPI: Top Riskiest Products ────────────────────────────────────────────
   function renderMetricsTopRisk() {
-    const filteredVulnIds = new Set(globallyFiltered.map(v => (v as { id: string }).id));
-
+    const filteredVulnIds = new Set(kpiFiltered.map(v => (v as { id: string }).id));
     const productRows = PLANVIEW_PRODUCTS.map((p, idx) => {
       let riskScore = 0, openVulns = 0, critical = 0, high = 0, medium = 0, low = 0, remediatedCount = 0, total = 0;
       const pas = allPAs.filter(pa => (pa.productName as string) === p.name && (pa.impactStatus as string) === 'Impacted');
@@ -1367,12 +1482,11 @@ export default function ReportsPage() {
       }
       const remPct = total > 0 ? Math.round((remediatedCount / total) * 100) : 0;
       return { rank: idx + 1, name: p.name, icon: p.icon, riskScore, openVulns, critical, high, medium, low, remediatedCount, total, remPct };
-    }).sort((a, b) => b.riskScore - a.riskScore).map((r, i) => ({ ...r, rank: i + 1 }));
+    }).sort((a,b) => b.riskScore - a.riskScore).map((r,i) => ({ ...r, rank: i + 1 }));
 
-    const totalOpenCrit = productRows.reduce((s, r) => s + r.critical, 0);
+    const totalOpenCrit = productRows.reduce((s,r) => s + r.critical, 0);
     const prodsWithCrit = productRows.filter(r => r.critical > 0).length;
     const topProd       = productRows[0];
-
     const chartData = productRows.filter(r => r.riskScore > 0).map(r => ({ name: r.name, 'Risk Score': r.riskScore }));
 
     return (
@@ -1382,11 +1496,10 @@ export default function ReportsPage() {
           <p className="text-slate-400 text-sm mt-0.5">Products ranked by cumulative open risk score</p>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-6">
-          <KpiCard label="Most At-Risk Product"       value={topProd?.riskScore > 0 ? topProd.name : '—'} color="text-red-400" sub={topProd?.riskScore > 0 ? `Risk score: ${topProd.riskScore}` : undefined} />
-          <KpiCard label="Total Open Critical Vulns"  value={totalOpenCrit}   color={totalOpenCrit > 0 ? 'text-red-400' : 'text-slate-400'} />
-          <KpiCard label="Products with Critical"     value={prodsWithCrit}   color={prodsWithCrit > 0 ? 'text-orange-400' : 'text-slate-400'} />
+          <KpiCard label="Most At-Risk Product"      value={topProd?.riskScore > 0 ? topProd.name : '—'} color="text-red-400" sub={topProd?.riskScore > 0 ? `Risk score: ${topProd.riskScore}` : undefined} />
+          <KpiCard label="Total Open Critical Vulns" value={totalOpenCrit} color={totalOpenCrit > 0 ? 'text-red-400' : 'text-slate-400'} />
+          <KpiCard label="Products with Critical"    value={prodsWithCrit} color={prodsWithCrit > 0 ? 'text-orange-400' : 'text-slate-400'} />
         </div>
-
         {chartData.length > 0 && (
           <ChartCard title="Risk Score by Product" sub="Sum of open vulnerability risk scores">
             <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>
@@ -1400,7 +1513,6 @@ export default function ReportsPage() {
             </ResponsiveContainer>
           </ChartCard>
         )}
-
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-6">
           <table className="w-full text-sm">
             <thead>
@@ -1438,96 +1550,207 @@ export default function ReportsPage() {
   }
 
   // ── Report dispatch ────────────────────────────────────────────────────────
-
   function renderReport() {
     switch (activeReport) {
-      case 'prod-vuln-report': return renderProdVulnReport();
-      case 'prod-sev-status':  return renderProdSevStatus();
-      case 'prod-exec':        return renderProdExec();
-      case 'vuln-products':    return renderVulnProducts();
-      case 'vuln-sev-status':  return renderVulnSevStatus();
-      case 'vuln-exec':        return renderVulnExec();
-      case 'metrics-mttr':     return renderMetricsMTTR();
-      case 'metrics-sla':      return renderMetricsSLA();
-      case 'metrics-aging':    return renderMetricsAging();
-      case 'metrics-trends':   return renderMetricsTrends();
-      case 'metrics-top-risk': return renderMetricsTopRisk();
+      case 'prod-vuln-report':      return renderProdVulnReport();
+      case 'prod-sev-status':       return renderProdSevStatus();
+      case 'prod-exec':             return renderProdExec();
+      case 'vuln-products':         return renderVulnProducts();
+      case 'vuln-sev-status':       return renderVulnSevStatus();
+      case 'vuln-exec':             return renderVulnExec();
+      case 'metrics-mttr':          return renderMetricsMTTR();
+      case 'metrics-sla-product':   return renderMetricsSLAProduct();
+      case 'metrics-sla-severity':  return renderMetricsSLASeverity();
+      case 'metrics-aging':         return renderMetricsAging();
+      case 'metrics-trends':        return renderMetricsTrends();
+      case 'metrics-top-risk':      return renderMetricsTopRisk();
     }
   }
 
+  // ── Contextual filter strips ───────────────────────────────────────────────
+  function renderProductFilters() {
+    const hasFilter = pProduct !== PLANVIEW_PRODUCTS[0].name || pSeverity || pStatus;
+    return (
+      <div className="flex items-center gap-3 flex-wrap">
+        <select value={pProduct} onChange={e => setPProduct(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition">
+          {PLANVIEW_PRODUCTS.map(p => <option key={p.name} value={p.name}>{p.icon} {p.name}</option>)}
+        </select>
+        <select value={pSeverity} onChange={e => setPSeverity(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition">
+          <option value="">All Severities</option>
+          {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={pStatus} onChange={e => setPStatus(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition">
+          <option value="">All Statuses</option>
+          {['Open','In Progress','Pending Verification','Remediated','Closed'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {hasFilter && (
+          <button onClick={() => { setPProduct(PLANVIEW_PRODUCTS[0].name); setPSeverity(''); setPStatus(''); }}
+            className="text-xs text-slate-500 hover:text-slate-300 transition">Clear ✕</button>
+        )}
+        <span className="ml-auto text-slate-600 text-xs">{prodFiltered.length} / {allVulns.length} vulns</span>
+      </div>
+    );
+  }
+
+  function renderVulnFilters() {
+    const hasFilter = vVulnId || vSeverity || vStatus || vZeroDay;
+    return (
+      <div className="flex items-center gap-3 flex-wrap">
+        <select value={effectiveVulnId} onChange={e => setVVulnId(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition max-w-[220px]">
+          {sortedVulns.map(v => (
+            <option key={(v as { id: string }).id} value={(v as { id: string }).id}>
+              {v.vulnerabilityId as string} — {(v.title as string).slice(0, 35)}
+            </option>
+          ))}
+        </select>
+        <select value={vSeverity} onChange={e => setVSeverity(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition">
+          <option value="">All Severities</option>
+          {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={vStatus} onChange={e => setVStatus(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-red-500 transition">
+          <option value="">All Statuses</option>
+          {['Open','In Progress','Pending Verification','Remediated','Closed'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <button onClick={() => setVZeroDay(!vZeroDay)}
+          className={`px-2.5 py-1 text-xs rounded border transition ${vZeroDay ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+          Zero-Day only
+        </button>
+        {hasFilter && (
+          <button onClick={() => { setVVulnId(''); setVSeverity(''); setVStatus(''); setVZeroDay(false); }}
+            className="text-xs text-slate-500 hover:text-slate-300 transition">Clear ✕</button>
+        )}
+        <span className="ml-auto text-slate-600 text-xs">{vulnFiltered.length} / {allVulns.length} vulns</span>
+      </div>
+    );
+  }
+
+  function renderKpiFilters() {
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-slate-500 text-xs">Showing last 12 months</span>
+        <span className="ml-auto text-slate-600 text-xs">{kpiFiltered.length} / {allVulns.length} vulns</span>
+      </div>
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  // Section icons (inline SVG-free approach using text glyphs)
+  const SECTION_ICONS: Record<ActiveSection, string> = {
+    products:        '🏢',
+    vulnerabilities: '⚠️',
+    kpis:            '📊',
+  };
+
+  // Section descriptions shown in the filter bar header
+  const ACTIVE_REPORT_LABEL = SECTION_REPORTS[activeSection].find(r => r.id === activeReport)?.label ?? '';
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
       <Sidebar />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="border-b border-slate-800 px-8 py-5 shrink-0">
-          <h1 className="text-xl font-bold text-white">Reports</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Products · Vulnerabilities · Metrics</p>
-        </div>
+      <main className="flex-1 flex overflow-hidden">
 
-        {/* Global filter bar */}
-        <div className="border-b border-slate-800 bg-slate-900/40 px-8 py-3 shrink-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-slate-500 text-xs font-medium shrink-0">Global Filters:</span>
-            <div className="flex gap-1">
-              {([['30d','30'],['90d','90'],['180d','180'],['YTD','ytd'],['All','all']] as const).map(([label, val]) => (
-                <button key={val} onClick={() => setGDatePreset(val)}
-                  className={`px-2.5 py-1 text-xs rounded border transition ${gDatePreset === val ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <select value={gSeverity} onChange={e => setGSeverity(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-red-500 transition">
-              <option value="">All Severities</option>
-              {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select value={gStatus} onChange={e => setGStatus(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-red-500 transition">
-              <option value="">All Statuses</option>
-              {['Open','In Progress','Pending Verification','Remediated','Closed'].map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <button onClick={() => setGZeroDay(!gZeroDay)}
-              className={`px-2.5 py-1 text-xs rounded border transition ${gZeroDay ? 'bg-red-500/10 border-red-500/40 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
-              Zero-Day only
-            </button>
-            {hasGlobalFilter && (
-              <button onClick={() => { setGDatePreset('all'); setGSeverity(''); setGStatus(''); setGZeroDay(false); }}
-                className="text-xs text-slate-500 hover:text-slate-300 transition ml-1">
-                Clear ✕
-              </button>
-            )}
-            <span className="ml-auto text-slate-600 text-xs">{globallyFiltered.length} / {allVulns.length} vulns</span>
-          </div>
-        </div>
+        {/* ── Reports navigation panel ────────────────────────────────── */}
+        <nav className="w-64 border-r border-slate-800 flex flex-col shrink-0 bg-slate-900/20">
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Report nav */}
-          <nav className="w-56 border-r border-slate-800 px-3 py-5 shrink-0 overflow-y-auto">
-            {REPORT_NAV.map(group => (
-              <div key={group.group} className="mb-5">
-                <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider px-3 mb-2">{group.group}</p>
-                {group.items.map(item => (
-                  <button key={item.id} onClick={() => setActiveReport(item.id)}
-                    className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition mb-0.5 ${
-                      activeReport === item.id
-                        ? 'bg-slate-800 text-white font-medium'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                    }`}>
-                    {item.label}
-                  </button>
-                ))}
+          {/* Panel header */}
+          <div className="px-5 pt-6 pb-4 border-b border-slate-800 shrink-0">
+            <div className="flex items-center gap-2.5 mb-0.5">
+              <div className="w-6 h-6 bg-red-600/20 border border-red-600/30 rounded-md flex items-center justify-center text-red-400 text-xs">
+                ▤
               </div>
-            ))}
-          </nav>
+              <h1 className="text-sm font-bold text-white tracking-tight">Reports</h1>
+            </div>
+            <p className="text-slate-500 text-xs pl-8">Analytics &amp; Insights</p>
+          </div>
+
+          {/* Accordion sections */}
+          <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1.5">
+            {(['products', 'vulnerabilities', 'kpis'] as ActiveSection[]).map(section => {
+              const isOpen = openSection === section;
+              return (
+                <div key={section}>
+                  {/* Section header */}
+                  <button
+                    onClick={() => switchSection(section)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                      isOpen
+                        ? 'bg-red-600/15 text-red-300 border-red-600/30 shadow-sm'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/70 border-transparent hover:border-slate-700/50'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span className="text-base leading-none">{SECTION_ICONS[section]}</span>
+                      <span>{section === 'products' ? 'Products' : section === 'vulnerabilities' ? 'Vulnerabilities' : 'KPIs'}</span>
+                    </span>
+                    <span className={`text-slate-400 text-xs font-normal transition-transform duration-200 ${isOpen ? 'rotate-90 text-red-400' : ''}`}>
+                      ›
+                    </span>
+                  </button>
+
+                  {/* Sub-menu items */}
+                  {isOpen && (
+                    <div className="mt-1 ml-3 pl-3 border-l-2 border-slate-700/60 space-y-0.5">
+                      {SECTION_REPORTS[section].map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => setActiveReport(item.id)}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all border ${
+                            activeReport === item.id
+                              ? 'bg-red-600/10 text-red-300 border-red-600/20 font-medium'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-800/50 border-transparent'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Panel footer – quick stats */}
+          <div className="px-4 py-4 border-t border-slate-800 shrink-0">
+            <p className="text-slate-600 text-xs text-center">{allVulns.length} vulnerabilities tracked</p>
+          </div>
+        </nav>
+
+        {/* ── Main content column ──────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Breadcrumb + filter strip */}
+          <div className="border-b border-slate-800 bg-slate-900/40 px-6 py-3 shrink-0">
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-2.5">
+              <span>Reports</span>
+              <span>›</span>
+              <span className={activeSection === 'products' ? 'text-slate-300' : activeSection === 'vulnerabilities' ? 'text-slate-300' : 'text-slate-300'}>
+                {activeSection === 'products' ? 'Products' : activeSection === 'vulnerabilities' ? 'Vulnerabilities' : 'KPIs'}
+              </span>
+              <span>›</span>
+              <span className="text-red-400 font-medium">{ACTIVE_REPORT_LABEL}</span>
+            </div>
+
+            {/* Contextual filters */}
+            {activeSection === 'products'        && renderProductFilters()}
+            {activeSection === 'vulnerabilities' && renderVulnFilters()}
+            {activeSection === 'kpis'            && renderKpiFilters()}
+          </div>
 
           {/* Report content */}
           <div className="flex-1 overflow-y-auto px-8 py-6">
             {renderReport()}
           </div>
+
         </div>
       </main>
     </div>

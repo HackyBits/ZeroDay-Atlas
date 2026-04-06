@@ -30,6 +30,7 @@ const schema = i.schema({
       dataSensitivity: i.string(),
       exposureLevel: i.string(),
       externalLink: i.string().optional(),
+      cvssScore: i.number().optional(),
       riskScore: i.number(),
       suggestedSeverity: i.string(),
       createdAt: i.number(),
@@ -78,6 +79,7 @@ const schema = i.schema({
       businessImpact: i.string(),       // Low | Medium | High
       dataSensitivity: i.string(),      // Public | Internal | Confidential | Restricted
       exposureLevel: i.string(),        // Internal | External | Internet-facing
+      cvssScore: i.number().optional(),
       riskScore: i.number(),
       suggestedSeverity: i.string(),
       updatedAt: i.number(),
@@ -107,7 +109,7 @@ const schema = i.schema({
     remediations: i.entity({
       vulnerabilityRef: i.string(),      // InstantDB ID of parent vulnerability
       productName: i.string(),
-      remediationPlan: i.string(),       // Patch | Config Change | Workaround
+      remediationPlan: i.string(),       // Patch | Code Fix | Package Fix | Config Change | Workaround
       patchAvailable: i.boolean(),
       etaForFix: i.string(),             // ISO date string
       remediationOwner: i.string(),
@@ -117,6 +119,7 @@ const schema = i.schema({
       verificationDate: i.string().optional(),
       verificationStatus: i.string(),    // Pending | Verified | Failed
       status: i.string(),                // In Progress | Blocked | Ready for Review | Done
+      resolvedAt: i.number().optional(), // Timestamp when status first set to Done (used for MTTR)
       notes: i.string().optional(),
       createdAt: i.number(),
       updatedAt: i.number(),

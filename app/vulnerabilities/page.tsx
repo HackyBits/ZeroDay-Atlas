@@ -14,23 +14,22 @@ const SEVERITY_BADGE: Record<string, string> = {
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  Open:                 'bg-red-500/10 text-red-400 border-red-500/20',
-  'In Progress':        'bg-orange-500/10 text-orange-400 border-orange-500/20',
-  Remediated:           'bg-green-500/10 text-green-400 border-green-500/20',
-  'Pending Verification': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  Closed:               'bg-slate-700 text-slate-400 border-slate-600',
-  'Needs Info':         'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  Open:          'bg-red-500/10 text-red-400 border-red-500/20',
+  'In Progress': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  Closed:        'bg-slate-700 text-slate-400 border-slate-600',
 };
 
-const ALL_STATUSES = ['Open', 'In Progress', 'Needs Info', 'Remediated', 'Pending Verification', 'Closed'];
+const ALL_STATUSES = ['Open', 'In Progress', 'Closed'];
 const ALL_SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
 
 export default function VulnerabilitiesPage() {
   const router = useRouter();
   const { isLoading, user } = db.useAuth();
-  const { data: vulnData }      = db.useQuery({ vulnerabilities: {} });
-  const { data: triageData }    = db.useQuery({ triages: {} });
-  const { data: assessmentData } = db.useQuery({ assessments: {} });
+  const { data: vulnData }        = db.useQuery({ vulnerabilities: {} });
+  const { data: triageData }      = db.useQuery({ triages: {} });
+  const { data: assessmentData }  = db.useQuery({ assessments: {} });
+  const { data: remediationData }   = db.useQuery({ remediations: {} });
+  const { data: productTriageData } = db.useQuery({ productTriages: {} });
 
   const [search,   setSearch]   = useState('');
   const [filterStatus,   setFilterStatus]   = useState('');
@@ -49,8 +48,8 @@ export default function VulnerabilitiesPage() {
     );
   }
 
-  const vulns  = vulnData?.vulnerabilities ?? [];
-  const triages = triageData?.triages ?? [];
+  const vulns    = vulnData?.vulnerabilities ?? [];
+  const triages  = triageData?.triages ?? [];
 
   // Build severity + risk score lookups: assessment as base, triage.severity takes precedence for severity
   const assessments = assessmentData?.assessments ?? [];
@@ -70,16 +69,75 @@ export default function VulnerabilitiesPage() {
     }
   }
 
+  // Derive display status from workflow state.
+  // vulnerabilities.status is only updated by the global triage page, not per-product flow.
+  const remediations   = remediationData?.remediations ?? [];
+  const productTriages = productTriageData?.productTriages ?? [];
+
+  type RemEntry = { status: string; verificationStatus: string };
+  const remsByVuln: Record<string, RemEntry[]> = {};
+  for (const r of remediations) {
+    const ref = r.vulnerabilityRef as string;
+    if (!remsByVuln[ref]) remsByVuln[ref] = [];
+    remsByVuln[ref].push({
+      status:             (r.status             as string) ?? '',
+      verificationStatus: (r.verificationStatus as string) ?? '',
+    });
+  }
+
+  // A per-product remediation is fully closed when verification passed (or was skipped),
+  // matching the isProductDone logic in the Products page.
+  function isRemClosed(rem: RemEntry): boolean {
+    return rem.verificationStatus === 'Verified' || rem.verificationStatus === "Can't Verify";
+  }
+
+  const triagedVulns = new Set<string>();
+  // Track product triages where decision is Rejected/Risk Accepted (no remediation needed → counts as closed)
+  const rejectedByVuln: Record<string, number> = {};
+  const acceptedByVuln: Record<string, number> = {};
+  for (const pt of productTriages) {
+    const ref = pt.vulnerabilityRef as string;
+    const decision = (pt.decision as string) ?? '';
+    if (decision === 'Reject' || decision === 'Rejected' || decision === 'Risk Accepted') {
+      rejectedByVuln[ref] = (rejectedByVuln[ref] ?? 0) + 1;
+    } else {
+      acceptedByVuln[ref] = (acceptedByVuln[ref] ?? 0) + 1;
+    }
+    triagedVulns.add(ref);
+  }
+
+  function deriveStatus(vulnId: string, rawStatus: string): string {
+    const rawLower = (rawStatus ?? '').toLowerCase();
+    if (rawLower === 'closed') return 'Closed';
+
+    const rems = remsByVuln[vulnId] ?? [];
+    if (rems.length > 0) {
+      // All remediations verified/closed → Closed
+      if (rems.every(isRemClosed)) return 'Closed';
+      // Some remediation activity exists → In Progress
+      return 'In Progress';
+    }
+    // Triaged but no remediation yet — if all triaged products were rejected, close it
+    if (triagedVulns.has(vulnId) && !acceptedByVuln[vulnId] && rejectedByVuln[vulnId]) return 'Closed';
+    // Any product has started triaging → In Progress
+    if (triagedVulns.has(vulnId)) return 'In Progress';
+    // Fall back to raw status mapped to 3-state
+    if (rawLower === 'in progress' || rawLower === 'needs info' ||
+        rawLower === 'pending verification' || rawLower === 'remediated') return 'In Progress';
+    return 'Open';
+  }
+
   // Filter
   const filtered = [...vulns]
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     .filter((v) => {
       const vid = (v as { id: string }).id;
       const severity = severityByVuln[vid] ?? '';
+      const status = deriveStatus(vid, v.status as string ?? '');
       if (search && !v.title?.toLowerCase().includes(search.toLowerCase()) &&
           !v.vulnerabilityId?.toLowerCase().includes(search.toLowerCase()) &&
           !v.cveId?.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filterStatus   && v.status !== filterStatus)     return false;
+      if (filterStatus   && status !== filterStatus)       return false;
       if (filterSeverity && severity !== filterSeverity)   return false;
       if (filterZeroDay  && !v.isZeroDay)                  return false;
       return true;
@@ -238,9 +296,9 @@ export default function VulnerabilitiesPage() {
                           )}
                         </td>
                         <td className="px-6 py-3">
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[v.status ?? ''] ?? 'bg-slate-700 text-slate-300 border-slate-600'}`}>
-                            {v.status ?? 'Open'}
-                          </span>
+                          {(() => { const s = deriveStatus(vid, v.status as string ?? ''); return (
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[s]}`}>{s}</span>
+                          ); })()}
                         </td>
                         <td className="px-6 py-3">
                           <div className="flex gap-1 flex-wrap">

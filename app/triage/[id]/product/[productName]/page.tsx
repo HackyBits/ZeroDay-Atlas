@@ -16,7 +16,6 @@ type TriageStatus = 'New' | 'Accepted' | 'Rejected' | 'Needs Info' | 'Risk Accep
 
 interface TriageForm {
   severity:             Severity;
-  cvssScore:            string;
   priority:             Priority;
   assignedTeam:         string;
   assignedOwner:        string;
@@ -63,8 +62,6 @@ const PRIORITY_STYLE: Record<Priority, string> = {
   P3: 'bg-yellow-500/10 border-yellow-500/40 text-yellow-400',
   P4: 'bg-slate-700 border-slate-600 text-slate-300',
 };
-const CVSS_COLOR = (n: number) =>
-  n >= 9 ? 'text-red-400' : n >= 7 ? 'text-orange-400' : n >= 4 ? 'text-yellow-400' : 'text-blue-400';
 
 const TEAMS = ['Security', 'Development', 'DevOps', 'CloudOps', 'Platform', 'QA', 'Compliance'];
 
@@ -125,7 +122,7 @@ export default function ProductTriagePage() {
   const { data: triageData }  = db.useQuery({ productTriages:     { $: { where: { vulnerabilityRef: vulnInstantId, productName } } } });
 
   const [form, setForm] = useState<TriageForm>({
-    severity: 'High', cvssScore: '', priority: 'P2',
+    severity: 'High', priority: 'P2',
     assignedTeam: '', assignedOwner: '', notes: '', rejectionReason: '', needsMoreInfoDetails: '', riskAcceptedJustification: '',
   });
   const [decision,      setDecision]      = useState<Decision | null>(null);
@@ -138,7 +135,6 @@ export default function ProductTriagePage() {
     if (existing) {
       setForm({
         severity:        (existing.severity        as Severity)  ?? 'High',
-        cvssScore:       String(existing.cvssScore ?? ''),
         priority:        (existing.priority        as Priority)  ?? 'P2',
         assignedTeam:    (existing.assignedTeam    as string)    ?? '',
         assignedOwner:   (existing.assignedOwner   as string)    ?? '',
@@ -164,7 +160,6 @@ export default function ProductTriagePage() {
     if (!authLoading && !user) router.push('/');
   }, [authLoading, user, router]);
 
-  const cvssNum     = useMemo(() => parseFloat(form.cvssScore) || 0, [form.cvssScore]);
   const slaLabel    = useMemo(() => SLA_LABEL[form.severity],        [form.severity]);
   const slaDeadline = useMemo(() => calcSlaDeadline(form.severity),  [form.severity]);
 
@@ -194,7 +189,6 @@ export default function ProductTriagePage() {
           vulnerabilityRef: vulnInstantId,
           productName,
           severity:         form.severity,
-          cvssScore:        parseFloat(form.cvssScore) || 0,
           priority:         form.priority,
           decision,
           assignedTeam:     form.assignedTeam,
@@ -316,45 +310,22 @@ export default function ProductTriagePage() {
                 </div>
               </SectionCard>
 
-              {/* CVSS + Priority */}
-              <div className="grid sm:grid-cols-2 gap-5">
-                <SectionCard title="CVSS Score" desc="Numeric score (0.0 – 10.0)">
-                  <div className="relative">
-                    <input type="number" min="0" max="10" step="0.1"
-                      value={form.cvssScore} onChange={(e) => set('cvssScore', e.target.value)}
-                      placeholder="e.g. 9.8"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition pr-16" />
-                    {form.cvssScore && (
-                      <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-lg font-bold ${CVSS_COLOR(cvssNum)}`}>
-                        {cvssNum.toFixed(1)}
+              {/* Priority */}
+              <SectionCard title="Priority" desc="Urgency for this product">
+                <div className="grid grid-cols-2 gap-2">
+                  {(['P1','P2','P3','P4'] as Priority[]).map((p) => (
+                    <button key={p} onClick={() => set('priority', p)}
+                      className={`py-2.5 text-sm font-semibold rounded-lg border-2 transition ${
+                        form.priority === p ? PRIORITY_STYLE[p] : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                      }`}>
+                      {p}
+                      <span className="block text-xs font-normal mt-0.5 opacity-70">
+                        {p === 'P1' ? 'Immediate' : p === 'P2' ? 'High' : p === 'P3' ? 'Normal' : 'Low'}
                       </span>
-                    )}
-                  </div>
-                  {form.cvssScore && (
-                    <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${
-                        cvssNum >= 9 ? 'bg-red-500' : cvssNum >= 7 ? 'bg-orange-500' : cvssNum >= 4 ? 'bg-yellow-500' : 'bg-blue-500'
-                      }`} style={{ width: `${(cvssNum / 10) * 100}%` }} />
-                    </div>
-                  )}
-                </SectionCard>
-
-                <SectionCard title="Priority" desc="Urgency for this product">
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['P1','P2','P3','P4'] as Priority[]).map((p) => (
-                      <button key={p} onClick={() => set('priority', p)}
-                        className={`py-2.5 text-sm font-semibold rounded-lg border-2 transition ${
-                          form.priority === p ? PRIORITY_STYLE[p] : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
-                        }`}>
-                        {p}
-                        <span className="block text-xs font-normal mt-0.5 opacity-70">
-                          {p === 'P1' ? 'Immediate' : p === 'P2' ? 'High' : p === 'P3' ? 'Normal' : 'Low'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </SectionCard>
-              </div>
+                    </button>
+                  ))}
+                </div>
+              </SectionCard>
 
               {/* Assignment */}
               <SectionCard title="Assignment" desc="Who owns remediation for this product?">
