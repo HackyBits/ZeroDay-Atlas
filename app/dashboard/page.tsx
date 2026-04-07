@@ -105,7 +105,7 @@ export default function Dashboard() {
     );
   }
 
-  const allVulns       = vulnData?.vulnerabilities       ?? [];
+  const allVulns       = (vulnData?.vulnerabilities       ?? []).filter((v: { archived?: boolean }) => !v.archived);
   const allTriages     = triageData?.triages             ?? [];
   const allAssessments = assessmentData?.assessments     ?? [];
   const allRemediations = remediationData?.remediations  ?? [];

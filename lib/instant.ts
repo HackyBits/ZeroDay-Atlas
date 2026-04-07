@@ -19,6 +19,9 @@ const schema = i.schema({
       remediatedAt: i.number().optional(),
       createdAt: i.number(),
       createdBy: i.string().optional(),
+      archived: i.boolean().optional(),
+      archivedAt: i.number().optional(),
+      archivedBy: i.string().optional(),
     }),
     assessments: i.entity({
       vulnerabilityRef: i.string(),
@@ -123,6 +126,29 @@ const schema = i.schema({
       notes: i.string().optional(),
       createdAt: i.number(),
       updatedAt: i.number(),
+    }),
+    roles: i.entity({
+      name: i.string(),
+      description: i.string().optional(),
+      permissions: i.json(),             // Record<module, Record<action, boolean>>
+      isSystem: i.boolean(),             // true = built-in role, cannot delete
+      createdAt: i.number(),
+      updatedAt: i.number(),
+    }),
+    userRoles: i.entity({
+      email: i.string(),
+      roleId: i.string(),
+      roleName: i.string(),
+      assignedAt: i.number(),
+      assignedBy: i.string().optional(),
+      products: i.json().optional(),   // string[] — product lines this user can access
+    }),
+    auditLogs: i.entity({
+      action: i.string(),                // ROLE_CREATED | ROLE_UPDATED | ROLE_DELETED | USER_ASSIGNED
+      targetEmail: i.string().optional(),
+      roleName: i.string(),
+      performedBy: i.string(),
+      timestamp: i.number(),
     }),
   },
 });

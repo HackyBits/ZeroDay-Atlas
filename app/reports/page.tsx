@@ -230,7 +230,7 @@ export default function ReportsPage() {
     );
   }
 
-  const allVulns  = vulnData?.vulnerabilities    ?? [];
+  const allVulns  = (vulnData?.vulnerabilities    ?? []).filter((v: { archived?: boolean }) => !v.archived);
   const allAssess = assessData?.assessments      ?? [];
   const allPAs    = paData?.productAssessments   ?? [];
   const allPTs    = ptData?.productTriages       ?? [];

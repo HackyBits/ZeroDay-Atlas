@@ -84,7 +84,7 @@ export default function ProductsPage() {
     );
   }
 
-  const vulns     = vulnData?.vulnerabilities    ?? [];
+  const vulns     = (vulnData?.vulnerabilities    ?? []).filter((v: { archived?: boolean }) => !v.archived);
   const allAssess = assessData?.assessments      ?? [];
   const allPAs    = paData?.productAssessments   ?? [];
   const allPTs    = ptData?.productTriages       ?? [];
