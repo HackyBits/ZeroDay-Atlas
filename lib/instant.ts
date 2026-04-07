@@ -1,6 +1,9 @@
 import { init, i } from '@instantdb/react';
 
-const APP_ID = process.env.NEXT_PUBLIC_INSTANT_APP_ID || 'ae4ae7dd-e3f2-4201-8486-ba75975c9aba';
+const APP_ID = process.env.NEXT_PUBLIC_INSTANT_APP_ID;
+if (!APP_ID) {
+  throw new Error('NEXT_PUBLIC_INSTANT_APP_ID environment variable is not set');
+}
 
 const schema = i.schema({
   entities: {

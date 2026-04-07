@@ -220,13 +220,20 @@ export default function Dashboard() {
   const vulnById: Record<string, typeof allVulns[number]> = {};
   for (const v of allVulns) vulnById[(v as { id: string }).id] = v;
 
+  // ── Severity-filtered vulns for stat cards ───────────────────────────────
+  const metricVulns = vulns.filter((v) => {
+    if (!filterSeverity) return true;
+    const vid = (v as { id: string }).id;
+    return severityByVuln[vid] === filterSeverity;
+  });
+
   // ── Summary metrics ───────────────────────────────────────────────────────
-  const zeroDayActive = vulns.filter((v) => v.isZeroDay && !isVulnClosed((v as { id: string }).id)).length;
-  const closedCount   = vulns.filter((v) => isVulnClosed((v as { id: string }).id)).length;
+  const zeroDayActive = metricVulns.filter((v) => v.isZeroDay && !isVulnClosed((v as { id: string }).id)).length;
+  const closedCount   = metricVulns.filter((v) => isVulnClosed((v as { id: string }).id)).length;
 
   // MTTR: avg days from vuln createdAt to when the last impacted product became Done
   let mttrTotal = 0, mttrCount = 0;
-  for (const v of allVulns) {
+  for (const v of metricVulns) {
     const vid = (v as { id: string }).id;
     if (!isVulnClosed(vid)) continue;
     const created  = (v.createdAt as number) ?? 0;

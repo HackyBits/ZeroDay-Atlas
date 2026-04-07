@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { id as instantId } from '@instantdb/react';
 import db from '@/lib/instant';
 import Sidebar from '@/app/components/Sidebar';
+import { isSafeUrl } from '@/lib/url';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -425,21 +426,21 @@ function TaskCard({
         </div>
         <div className="flex items-center gap-2">
           {/* External links */}
-          {task.jiraLink && (
+          {task.jiraLink && isSafeUrl(task.jiraLink) && (
             <a href={task.jiraLink} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded transition">
               Jira ↗
             </a>
           )}
-          {task.githubLink && (
+          {task.githubLink && isSafeUrl(task.githubLink) && (
             <a href={task.githubLink} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-purple-400 hover:text-purple-300 border border-purple-500/20 px-2 py-0.5 rounded transition">
               GitHub ↗
             </a>
           )}
-          {task.agileplacLink && (
+          {task.agileplacLink && isSafeUrl(task.agileplacLink) && (
             <a href={task.agileplacLink} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-green-400 hover:text-green-300 border border-green-500/20 px-2 py-0.5 rounded transition">

@@ -243,8 +243,8 @@ export default function ProductsPage() {
         <div className="border-b border-slate-800 bg-slate-900/50 px-8 py-6">
           <div className="max-w-6xl mx-auto">
             {/* Header with vulnerability dropdown */}
-            <div className="flex items-center justify-between mb-5">
-              <div>
+            <div className="mb-5">
+              <div className="mb-4">
                 <h1 className="text-xl font-bold text-white">Products</h1>
                 <p className="text-slate-400 text-sm mt-0.5">Select a vulnerability to view product exposure</p>
               </div>
@@ -291,12 +291,8 @@ export default function ProductsPage() {
             )}
 
             {/* Snapshot cards — scoped to this vulnerability */}
-            {!selectedVulnId && (
-              <div className="mt-2 text-slate-500 text-sm">
-                Choose a vulnerability from the dropdown above to view product exposure.
-              </div>
-            )}
-            <div className={`grid grid-cols-3 gap-4 ${!selectedVulnId ? 'opacity-30 pointer-events-none' : ''}`}>
+            {selectedVulnId && (
+              <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-900 border border-red-500/20 rounded-xl p-5">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
@@ -366,6 +362,7 @@ export default function ProductsPage() {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
 

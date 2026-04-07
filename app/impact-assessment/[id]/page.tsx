@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { id as instantId } from '@instantdb/react';
 import db from '@/lib/instant';
 import Sidebar from '@/app/components/Sidebar';
+import { isSafeUrl } from '@/lib/url';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -600,7 +601,7 @@ export default function ImpactAssessmentPage() {
                 </span>
               )}
             </div>
-            {isReadOnly && externalLink ? (
+            {isReadOnly && externalLink && isSafeUrl(externalLink) ? (
               <a href={externalLink} target="_blank" rel="noopener noreferrer"
                 className="text-sm text-red-400 hover:text-red-300 underline underline-offset-2 break-all transition">
                 {externalLink}
