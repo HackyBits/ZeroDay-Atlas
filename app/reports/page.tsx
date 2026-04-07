@@ -86,12 +86,10 @@ const SECTION_LABELS: Record<ActiveSection, string> = {
 const SECTION_REPORTS: Record<ActiveSection, { id: ActiveReport; label: string }[]> = {
   products: [
     { id: 'prod-vuln-report', label: 'Product Vulnerability Report' },
-    { id: 'prod-sev-status',  label: 'Severity & Status Breakdown' },
     { id: 'prod-exec',        label: 'Executive Summary' },
   ],
   vulnerabilities: [
     { id: 'vuln-products',   label: 'Vulnerability → Products' },
-    { id: 'vuln-sev-status', label: 'Severity & Status Report' },
     { id: 'vuln-exec',       label: 'Executive Summary' },
   ],
   kpis: [
@@ -207,7 +205,7 @@ export default function ReportsPage() {
   // ── Section & report state ─────────────────────────────────────────────────
   const [activeSection, setActiveSection] = useState<ActiveSection>('products');
   const [activeReport,  setActiveReport]  = useState<ActiveReport>('prod-vuln-report');
-  const [openSection,   setOpenSection]   = useState<ActiveSection | null>('products');
+  const [openSection,   setOpenSection]   = useState<ActiveSection | null>(null);
 
   // ── Products section filters ───────────────────────────────────────────────
   const [pProduct,  setPProduct]  = useState(PLANVIEW_PRODUCTS[0].name);

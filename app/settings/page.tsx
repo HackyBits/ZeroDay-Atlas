@@ -19,6 +19,9 @@ import {
   Check,
   Mail,
   UserPlus,
+  Plug,
+  CheckCircle2,
+  ExternalLink,
 } from 'lucide-react';
 import Sidebar from '@/app/components/Sidebar';
 import db from '@/lib/instant';
@@ -686,7 +689,8 @@ export default function SettingsPage() {
   const userRoles: UserRole[] = (data?.userRoles as UserRole[]) ?? [];
   const auditLogs: AuditLog[] = (data?.auditLogs as AuditLog[]) ?? [];
 
-  const [activeTab,        setActiveTab]        = useState<'roles' | 'users' | 'audit'>('roles');
+  const [activeTab,        setActiveTab]        = useState<'roles' | 'users' | 'audit' | 'integrations'>('roles');
+  const [connectedIntegrations, setConnectedIntegrations] = useState<Record<string, boolean>>({});
   const [selectedRoleId,   setSelectedRoleId]   = useState<string | null>(null);
   const [search,           setSearch]           = useState('');
   const [showModal,        setShowModal]        = useState(false);
@@ -835,9 +839,10 @@ export default function SettingsPage() {
           {/* Tabs */}
           <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit">
             {([
-              { key: 'roles', label: 'Roles & Permissions', Icon: Shield },
-              { key: 'users', label: 'Users',               Icon: Users },
-              { key: 'audit', label: 'Audit Log',           Icon: ClipboardList },
+              { key: 'roles',        label: 'Roles & Permissions', Icon: Shield        },
+              { key: 'users',        label: 'Users',               Icon: Users         },
+              { key: 'audit',        label: 'Audit Log',           Icon: ClipboardList },
+              { key: 'integrations', label: 'Integrations',        Icon: Plug          },
             ] as const).map(({ key, label, Icon }) => (
               <button key={key} onClick={() => setActiveTab(key)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -1100,6 +1105,131 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+
+          {/* ── Tab: Integrations ───────────────────────────────────────────── */}
+          {activeTab === 'integrations' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-white text-base font-semibold">Connected Integrations</h2>
+                <p className="text-slate-500 text-sm mt-0.5">Connect external tools to sync vulnerabilities, issues, and workflows.</p>
+              </div>
+
+              {/* Integration Cards Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                {/* Jira */}
+                {[
+                  {
+                    id: 'jira',
+                    name: 'Jira',
+                    vendor: 'Atlassian',
+                    description: 'Sync vulnerabilities as Jira issues. Auto-create tickets on triage and track remediation status.',
+                    color: 'bg-blue-600',
+                    letter: 'J',
+                    badge: null,
+                  },
+                  {
+                    id: 'github',
+                    name: 'GitHub',
+                    vendor: 'GitHub Inc.',
+                    description: 'Link vulnerabilities to GitHub repositories. Create issues and track fixes via pull requests.',
+                    color: 'bg-slate-600',
+                    letter: 'G',
+                    badge: null,
+                  },
+                  {
+                    id: 'confluence',
+                    name: 'Confluence',
+                    vendor: 'Atlassian',
+                    description: 'Publish security reports and remediation runbooks directly to Confluence spaces.',
+                    color: 'bg-cyan-600',
+                    letter: 'C',
+                    badge: null,
+                  },
+                  {
+                    id: 'agileplace',
+                    name: 'Agileplace',
+                    vendor: 'Planview',
+                    description: 'Push vulnerabilities as cards onto Agileplace boards for team-level tracking and prioritization.',
+                    color: 'bg-emerald-600',
+                    letter: 'A',
+                    badge: null,
+                  },
+                  {
+                    id: 'slack',
+                    name: 'Slack',
+                    vendor: 'Salesforce',
+                    description: 'Receive real-time alerts in Slack channels when new vulnerabilities are logged or status changes.',
+                    color: 'bg-purple-600',
+                    letter: 'S',
+                    badge: 'Coming Soon',
+                  },
+                ].map((integration) => {
+                  const isConnected = !!connectedIntegrations[integration.id];
+                  return (
+                    <div key={integration.id}
+                      className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4 hover:border-slate-700 transition-colors">
+                      {/* Header */}
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-lg ${integration.color} flex items-center justify-center text-white font-bold text-base shrink-0`}>
+                            {integration.letter}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white text-sm font-semibold">{integration.name}</span>
+                              {integration.badge && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-400 border border-slate-600">
+                                  {integration.badge}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-slate-500 text-xs">{integration.vendor}</span>
+                          </div>
+                        </div>
+                        {isConnected && (
+                          <span className="flex items-center gap-1 text-emerald-400 text-xs font-medium">
+                            <CheckCircle2 size={13} />
+                            Connected
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Description */}
+                      <p className="text-slate-400 text-xs leading-relaxed flex-1">{integration.description}</p>
+
+                      {/* Footer */}
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
+                        {integration.badge === 'Coming Soon' ? (
+                          <button disabled
+                            className="flex-1 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700">
+                            Coming Soon
+                          </button>
+                        ) : isConnected ? (
+                          <>
+                            <button
+                              onClick={() => setConnectedIntegrations(prev => ({ ...prev, [integration.id]: false }))}
+                              className="flex-1 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700 transition-colors">
+                              Disconnect
+                            </button>
+                            <button className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 hover:bg-slate-700 transition-colors">
+                              <ExternalLink size={13} />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setConnectedIntegrations(prev => ({ ...prev, [integration.id]: true }))}
+                            className="flex-1 py-2 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-500 text-white transition-colors">
+                            Connect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
