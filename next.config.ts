@@ -1,6 +1,24 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Turbopack: stub out optional jsPDF peer deps (SVG/HTML rendering we don't use)
+  turbopack: {
+    resolveAlias: {
+      canvg:       "./lib/empty-module.js",
+      html2canvas: "./lib/empty-module.js",
+      dompurify:   "./lib/empty-module.js",
+    },
+  },
+  // Webpack (used by `next build`): false = empty module
+  webpack(config) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvg:       false,
+      html2canvas: false,
+      dompurify:   false,
+    };
+    return config;
+  },
   async headers() {
     return [
       {

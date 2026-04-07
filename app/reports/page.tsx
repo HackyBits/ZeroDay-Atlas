@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
@@ -9,6 +9,8 @@ import {
 } from 'recharts';
 import db from '@/lib/instant';
 import Sidebar from '@/app/components/Sidebar';
+import { ShieldAlert, Boxes, BarChart3 } from 'lucide-react';
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -85,12 +87,10 @@ const SECTION_LABELS: Record<ActiveSection, string> = {
 };
 const SECTION_REPORTS: Record<ActiveSection, { id: ActiveReport; label: string }[]> = {
   products: [
-    { id: 'prod-vuln-report', label: 'Product Vulnerability Report' },
-    { id: 'prod-exec',        label: 'Executive Summary' },
+    { id: 'prod-vuln-report', label: 'Executive Summary' },
   ],
   vulnerabilities: [
-    { id: 'vuln-products',   label: 'Vulnerability → Products' },
-    { id: 'vuln-exec',       label: 'Executive Summary' },
+    { id: 'vuln-products',   label: 'Executive Summary' },
   ],
   kpis: [
     { id: 'metrics-mttr',         label: 'MTTR by Product' },
@@ -185,6 +185,14 @@ function ExportBtn({ onClick }: { onClick: () => void }) {
     <button onClick={onClick}
       className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition flex items-center gap-1.5">
       ↓ Export CSV
+    </button>
+  );
+}
+function ExportPdfBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className="bg-red-900/30 hover:bg-red-900/50 border border-red-800/50 text-red-300 hover:text-red-200 text-xs px-3 py-2 rounded-lg transition flex items-center gap-1.5">
+      ↓ Export PDF
     </button>
   );
 }
@@ -355,7 +363,7 @@ export default function ReportsPage() {
         const resolved   = vuln && (vuln.status === 'Remediated' || vuln.status === 'Closed')
           ? ((rem?.updatedAt as number) ?? (vuln.remediatedAt as number) ?? undefined) : undefined;
         const days = vuln ? daysOpen(vuln.createdAt as number, resolved) : 0;
-        return { vulnId, vuln, pt, rem, sev, cvss, assignedTo, versions, days };
+        return { vulnId, vuln, pa, pt, rem, sev, cvss, assignedTo, versions, days };
       }).filter(r => !!r.vuln);
 
     function exportCSV() {
@@ -366,14 +374,115 @@ export default function ReportsPage() {
       downloadCSV(csv, `${pProduct}-vulnerabilities.csv`);
     }
 
+    async function exportPDF() {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = margin;
+      const now = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const SEV_FILL: Record<string, [number, number, number]> = {
+        Critical: [254, 226, 226], High: [255, 237, 213], Medium: [254, 249, 195], Low: [219, 234, 254],
+      };
+      const SEV_TEXT: Record<string, [number, number, number]> = {
+        Critical: [185, 28, 28], High: [194, 65, 12], Medium: [161, 98, 7], Low: [29, 78, 216],
+      };
+
+      // Header band
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, pageW, 28, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+      doc.text('Executive Summary', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      doc.text(`Product: ${pProduct}`, margin, 19);
+      doc.text(`Generated: ${now}`, pageW - margin, 19, { align: 'right' });
+      y = 33;
+
+      // Summary table
+      const sevCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+      for (const r of rows) {
+        if (r.sev && r.sev in sevCounts) sevCounts[r.sev as keyof typeof sevCounts]++;
+      }
+      autoTable(doc, {
+        startY: y,
+        head: [['Total Vulnerabilities', 'Critical', 'High', 'Medium', 'Low']],
+        body: [[rows.length, sevCounts.Critical, sevCounts.High, sevCounts.Medium, sevCounts.Low]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 9, halign: 'center' },
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section === 'body') {
+            if (data.column.index === 1) { data.cell.styles.textColor = SEV_TEXT.Critical; data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 2) { data.cell.styles.textColor = SEV_TEXT.High;     data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 3) { data.cell.styles.textColor = SEV_TEXT.Medium;   data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 4) { data.cell.styles.textColor = SEV_TEXT.Low;       data.cell.styles.fontStyle = 'bold'; }
+          }
+        },
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+
+      // Per-vulnerability sections
+      for (const r of rows) {
+        const fill = SEV_FILL[r.sev ?? ''] ?? [241, 245, 249];
+        const text = SEV_TEXT[r.sev ?? ''] ?? [30, 41, 59];
+
+        autoTable(doc, {
+          startY: y,
+          head: [[{
+            content: `${r.vuln.vulnerabilityId as string}  |  ${r.sev ?? '—'}  |  CVE: ${(r.vuln.cveId as string) ?? 'N/A'}`,
+            colSpan: 4,
+            styles: { fillColor: fill, textColor: text, fontStyle: 'bold', fontSize: 9 },
+          }]],
+          body: [
+            [{ content: r.vuln.title as string, colSpan: 4, styles: { fontStyle: 'bold', fontSize: 10 } }],
+            ['Severity',       r.sev ?? '—',                                               'CVSS Score',        String(r.cvss ?? '—')],
+            ['Risk Score',     String((r.pa?.riskScore as number) ?? '—'),                  'Status',            (r.vuln.status as string) ?? 'Open'],
+            ['Triage Status',  (r.pt?.status as string) ?? '—',                            'Remediation',       (r.rem?.status as string) ?? '—'],
+            ['Verification',   (r.rem?.verificationStatus as string) ?? '—',               'Days Open',         `${r.days}d`],
+            ['Assigned Owner', r.assignedTo ?? '—',                                         'SLA Deadline',      (r.pt?.slaDeadline as string) ?? '—'],
+            ['Priority',       (r.pt?.priority as string) ?? '—',                          'Exploit Available', (r.vuln.exploitAvailability as string) ?? '—'],
+            ['Versions Impacted', { content: r.versions ?? '—', colSpan: 3 }],
+            [{ content: 'Description', colSpan: 4, styles: { fontStyle: 'bold', fillColor: [241, 245, 249] } }],
+            [{ content: (r.vuln.description as string) || 'No description available.', colSpan: 4, styles: { fontSize: 8 } }],
+            [{ content: 'Impact Assessment', colSpan: 4, styles: { fontStyle: 'bold', fillColor: [241, 245, 249] } }],
+            ['Business Impact', (r.pa?.businessImpact as string) ?? '—',                   'Data Sensitivity',  (r.pa?.dataSensitivity as string) ?? '—'],
+            ['Exposure Level',  { content: (r.pa?.exposureLevel as string) ?? '—', colSpan: 3 }],
+            [{ content: 'Remediation Details', colSpan: 4, styles: { fontStyle: 'bold', fillColor: [241, 245, 249] } }],
+            ['Plan',           (r.rem?.remediationPlan as string) ?? '—',                   'Patch Available',   (r.rem?.patchAvailable as boolean) ? 'Yes' : (r.rem ? 'No' : '—')],
+            ['Fix Version',    (r.rem?.fixVersion as string) ?? '—',                        'ETA',               (r.rem?.etaForFix as string) ?? '—'],
+          ],
+          columnStyles: {
+            0: { cellWidth: 38, fontStyle: 'bold', textColor: [71, 85, 105] },
+            1: { cellWidth: 57 },
+            2: { cellWidth: 38, fontStyle: 'bold', textColor: [71, 85, 105] },
+            3: { cellWidth: 57 },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          theme: 'grid',
+        });
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+      }
+
+      doc.save(`${pProduct}-vulnerability-report.pdf`);
+    }
+
     return (
       <div>
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-white font-bold text-lg">Product Vulnerability Report</h2>
+            <h2 className="text-sky-400 font-bold text-lg">Executive Summary</h2>
             <p className="text-slate-400 text-sm mt-0.5">All vulnerabilities impacting <span className="text-white font-medium">{pProduct}</span></p>
           </div>
-          <ExportBtn onClick={exportCSV} />
+          <div className="flex items-center gap-2">
+            <ExportBtn onClick={exportCSV} />
+            <ExportPdfBtn onClick={() => { void exportPDF(); }} />
+          </div>
         </div>
         {rows.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
@@ -630,17 +739,37 @@ export default function ReportsPage() {
   // ── Vulnerabilities: Vulnerability → Products ─────────────────────────────
   function renderVulnProducts() {
     const selectedVuln = effectiveVulnId ? vulnById[effectiveVulnId] : null;
-    const rows = allPAs
-      .filter(pa => (pa.vulnerabilityRef as string) === effectiveVulnId && (pa.impactStatus as string) === 'Impacted')
-      .map(pa => {
-        const product    = pa.productName as string;
-        const pt         = getPT(effectiveVulnId, product);
-        const rem        = getRem(effectiveVulnId, product);
-        const icon       = PLANVIEW_PRODUCTS.find(p => p.name === product)?.icon ?? '⬡';
-        const versions   = ((pa.versionsImpacted as string[]) ?? []).join(', ') || null;
-        const assignedTo = (pt?.assignedOwner as string) || null;
-        return { product, icon, pa, pt, rem, versions, assignedTo };
-      });
+
+    // productAssessments records for this vulnerability (created on per-product detail pages)
+    const paForVuln = allPAs.filter(pa =>
+      (pa.vulnerabilityRef as string) === effectiveVulnId && (pa.impactStatus as string) === 'Impacted'
+    );
+    const paByProduct: Record<string, typeof paForVuln[number]> = {};
+    for (const pa of paForVuln) paByProduct[pa.productName as string] = pa;
+
+    // assessments.affectedProducts is the source of truth for which products are Impacted
+    // (set on the main /impact-assessment/[id] page; productAssessments are only created
+    // when the user drills into each product's detail page)
+    const parentAssess = allAssess.find(a => (a.vulnerabilityRef as string) === effectiveVulnId);
+    const globalImpacted: string[] = ((parentAssess?.affectedProducts as { name: string; impactStatus: string }[]) ?? [])
+      .filter(p => p.impactStatus === 'Impacted')
+      .map(p => p.name);
+
+    // Union: all impacted product names from either source
+    const allImpactedNames = Array.from(new Set([
+      ...Object.keys(paByProduct),
+      ...globalImpacted,
+    ]));
+
+    const rows = allImpactedNames.map(product => {
+      const pa         = paByProduct[product] ?? null;
+      const pt         = getPT(effectiveVulnId, product);
+      const rem        = getRem(effectiveVulnId, product);
+      const icon       = PLANVIEW_PRODUCTS.find(p => p.name === product)?.icon ?? '⬡';
+      const versions   = pa ? (((pa.versionsImpacted as string[]) ?? []).join(', ') || null) : null;
+      const assignedTo = (pt?.assignedOwner as string) || null;
+      return { product, icon, pa, pt, rem, versions, assignedTo };
+    });
 
     function exportCSV() {
       const csv: (string | number)[][] = [['Product','Impact','Triage Decision','Triage Severity','Versions','Assigned To','Remediation Status','Verification']];
@@ -650,14 +779,187 @@ export default function ReportsPage() {
       downloadCSV(csv, `vuln-products-${effectiveVulnId}.csv`);
     }
 
+    async function exportPDF() {
+      if (!selectedVuln) return;
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc   = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      const colW   = pageW - margin * 2;
+      let y = margin;
+      const now = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const SEV_FILL: Record<string, [number,number,number]> = {
+        Critical: [254,226,226], High: [255,237,213], Medium: [254,249,195], Low: [219,234,254],
+      };
+      const SEV_TEXT: Record<string, [number,number,number]> = {
+        Critical: [185,28,28], High: [194,65,12], Medium: [161,98,7], Low: [29,78,216],
+      };
+
+      const vulnSev = globalSevByVuln[effectiveVulnId] ?? null;
+
+      // ── Header band ──────────────────────────────────────────────────────────
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, pageW, 30, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+      doc.text('Executive Summary', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      doc.text(`${selectedVuln.vulnerabilityId as string}  —  ${(selectedVuln.title as string).slice(0, 70)}`, margin, 20);
+      doc.text(`Generated: ${now}`, pageW - margin, 20, { align: 'right' });
+      y = 35;
+
+      // ── Vulnerability details ─────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [[{ content: 'Vulnerability Details', colSpan: 4,
+          styles: { fillColor: [30, 41, 59], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 } }]],
+        body: [
+          ['ID',                 selectedVuln.vulnerabilityId as string,
+           'CVE',                (selectedVuln.cveId as string) || '—'],
+          ['Status',             (selectedVuln.status as string) ?? 'Open',
+           'Severity',           vulnSev ?? '—'],
+          ['Exploit Available',  (selectedVuln.exploitAvailability as string) ?? '—',
+           'Zero-Day',           selectedVuln.isZeroDay ? 'Yes' : 'No'],
+          ['Source',             (selectedVuln.source as string) || '—',
+           'Date Discovered',    (selectedVuln.dateDiscovered as string) || '—'],
+          [{ content: 'Title', styles: { fontStyle: 'bold', textColor: [71,85,105] } },
+           { content: selectedVuln.title as string, colSpan: 3, styles: { fontStyle: 'bold' } }],
+          [{ content: 'Description', colSpan: 4, styles: { fontStyle: 'bold', fillColor: [241,245,249] } }],
+          [{ content: (selectedVuln.description as string) || 'No description available.', colSpan: 4, styles: { fontSize: 8 } }],
+        ],
+        columnStyles: {
+          0: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+          1: { cellWidth: colW / 2 - 38 },
+          2: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+          3: { cellWidth: colW / 2 - 38 },
+        },
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        theme: 'grid',
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+
+      // ── Global assessment metrics ─────────────────────────────────────────────
+      if (parentAssess) {
+        const affectedComps = ((parentAssess.affectedComponents as string[]) ?? []).join(', ') || '—';
+        autoTable(doc, {
+          startY: y,
+          head: [[{ content: 'Risk & Assessment', colSpan: 4,
+            styles: { fillColor: [30,41,59], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 } }]],
+          body: [
+            ['CVSS Score',      String((parentAssess.cvssScore as number) ?? '—'),
+             'Risk Score',      String((parentAssess.riskScore as number) ?? '—')],
+            ['Business Impact', (parentAssess.businessImpact as string) ?? '—',
+             'Data Sensitivity',(parentAssess.dataSensitivity as string) ?? '—'],
+            ['Exposure Level',  (parentAssess.exposureLevel as string) ?? '—',
+             'Suggested Sev.',  (parentAssess.suggestedSeverity as string) ?? '—'],
+            [{ content: 'Affected Components', styles: { fontStyle: 'bold', textColor: [71,85,105] } },
+             { content: affectedComps, colSpan: 3 }],
+          ],
+          columnStyles: {
+            0: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+            1: { cellWidth: colW / 2 - 38 },
+            2: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+            3: { cellWidth: colW / 2 - 38 },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          theme: 'grid',
+        });
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+      }
+
+      // ── Blast radius summary ──────────────────────────────────────────────────
+      const sevCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+      for (const r of rows) {
+        const s = (r.pt?.severity as string) ?? (r.pa?.suggestedSeverity as string) ?? '';
+        if (s in sevCounts) sevCounts[s as keyof typeof sevCounts]++;
+      }
+      autoTable(doc, {
+        startY: y,
+        head: [['Impacted Products', 'Critical', 'High', 'Medium', 'Low']],
+        body: [[rows.length, sevCounts.Critical, sevCounts.High, sevCounts.Medium, sevCounts.Low]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 9, halign: 'center' },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section === 'body') {
+            if (data.column.index === 1) { data.cell.styles.textColor = SEV_TEXT.Critical; data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 2) { data.cell.styles.textColor = SEV_TEXT.High;     data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 3) { data.cell.styles.textColor = SEV_TEXT.Medium;   data.cell.styles.fontStyle = 'bold'; }
+            if (data.column.index === 4) { data.cell.styles.textColor = SEV_TEXT.Low;      data.cell.styles.fontStyle = 'bold'; }
+          }
+        },
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+
+      // ── Per-product detail sections ───────────────────────────────────────────
+      for (const r of rows) {
+        const sev  = (r.pt?.severity as string) ?? (r.pa?.suggestedSeverity as string) ?? null;
+        const fill = SEV_FILL[sev ?? ''] ?? [241,245,249];
+        const text = SEV_TEXT[sev ?? ''] ?? [30,41,59];
+
+        autoTable(doc, {
+          startY: y,
+          head: [[{
+            content: `${r.product}  ${r.icon}`,
+            colSpan: 4,
+            styles: { fillColor: fill, textColor: text, fontStyle: 'bold', fontSize: 10 },
+          }]],
+          body: [
+            ['Severity',         sev ?? '—',
+             'CVSS Score',       String((r.pt?.cvssScore as number) ?? (r.pa?.cvssScore as number) ?? '—')],
+            ['Risk Score',       String((r.pa?.riskScore as number) ?? '—'),
+             'Triage Decision',  (r.pt?.decision as string) ?? '—'],
+            ['Triage Status',    (r.pt?.status as string) ?? '—',
+             'Priority',         (r.pt?.priority as string) ?? '—'],
+            ['Assigned Team',    (r.pt?.assignedTeam as string) ?? '—',
+             'Assigned Owner',   r.assignedTo ?? '—'],
+            ['SLA Deadline',     (r.pt?.slaDeadline as string) ?? '—',
+             'Versions',         r.versions ?? '—'],
+            ['Business Impact',  (r.pa?.businessImpact as string) ?? '—',
+             'Data Sensitivity', (r.pa?.dataSensitivity as string) ?? '—'],
+            ['Exposure Level',   { content: (r.pa?.exposureLevel as string) ?? '—', colSpan: 3 }],
+            [{ content: 'Remediation', colSpan: 4,
+               styles: { fontStyle: 'bold', fillColor: [241,245,249] } }],
+            ['Rem. Status',      (r.rem?.status as string) ?? '—',
+             'Plan',             (r.rem?.remediationPlan as string) ?? '—'],
+            ['Patch Available',  (r.rem?.patchAvailable as boolean) ? 'Yes' : (r.rem ? 'No' : '—'),
+             'ETA',              (r.rem?.etaForFix as string) ?? '—'],
+            ['Fix Version',      (r.rem?.fixVersion as string) ?? '—',
+             'Verification',     (r.rem?.verificationStatus as string) ?? '—'],
+          ],
+          columnStyles: {
+            0: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+            1: { cellWidth: colW / 2 - 38 },
+            2: { cellWidth: 38, fontStyle: 'bold', textColor: [71,85,105] },
+            3: { cellWidth: colW / 2 - 38 },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          theme: 'grid',
+        });
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
+      }
+
+      doc.save(`${selectedVuln.vulnerabilityId as string}-impact-report.pdf`);
+    }
+
     return (
       <div>
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-white font-bold text-lg">Vulnerability → Products Report</h2>
+            <h2 className="text-sky-400 font-bold text-lg">Executive Summary</h2>
             <p className="text-slate-400 text-sm mt-0.5">All products impacted by the selected vulnerability</p>
           </div>
-          <ExportBtn onClick={exportCSV} />
+          <div className="flex items-center gap-2">
+            <ExportBtn onClick={exportCSV} />
+            <ExportPdfBtn onClick={() => { void exportPDF(); }} />
+          </div>
         </div>
         {selectedVuln && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-5 flex items-center gap-4 flex-wrap">
@@ -921,11 +1223,187 @@ export default function ReportsPage() {
     const overallMTTR = totalCount > 0 ? (totalSum / totalCount).toFixed(1) : null;
     const chartData = rows.filter(r => r.overall !== null).map(r => ({ name: r.name, 'Avg Days': r.overall as number }));
 
+    // Build per-vulnerability MTTR detail rows (used by both UI drill-down and PDF)
+    type VulnMTTRRow = {
+      product: string; vulnId: string; title: string; sev: string;
+      dateLogged: string; dateRemediated: string; days: number;
+    };
+    const vulnMTTRRows: VulnMTTRRow[] = [];
+    for (const p of PLANVIEW_PRODUCTS) {
+      const pas = allPAs.filter(pa => (pa.productName as string) === p.name && (pa.impactStatus as string) === 'Impacted');
+      for (const pa of pas) {
+        const vulnId = pa.vulnerabilityRef as string;
+        const vuln   = vulnById[vulnId];
+        const rem    = getRem(vulnId, p.name);
+        if (!vuln || !rem || (rem.status as string) !== 'Done') continue;
+        const pt      = getPT(vulnId, p.name);
+        const sev     = (pt?.severity as string) ?? (pa.suggestedSeverity as string) ?? '—';
+        const created  = (vuln.createdAt as number) ?? 0;
+        const resolved = (rem.resolvedAt as number | undefined) ?? (rem.updatedAt as number) ?? 0;
+        if (!created || resolved <= created) continue;
+        const days = Math.round(((resolved - created) / 86_400_000) * 10) / 10;
+        vulnMTTRRows.push({
+          product:        p.name,
+          vulnId:         (vuln.vulnerabilityId as string) ?? vulnId,
+          title:          (vuln.title as string) ?? '',
+          sev,
+          dateLogged:     new Date(created).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }),
+          dateRemediated: new Date(resolved).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }),
+          days,
+        });
+      }
+    }
+
+    async function exportPDF() {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW  = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = margin;
+      const now = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+      const getY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      const mttrFill = (d: number | null): [number,number,number] =>
+        d === null ? [100,116,139] : d > 30 ? [239,68,68] : d > 15 ? [234,179,8] : [34,197,94];
+
+      // ── Header ──────────────────────────────────────────────────────────────
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, pageW, 28, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(14); doc.setFont('helvetica','bold');
+      doc.text('MTTR Report — Mean Time to Remediate', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica','normal');
+      doc.text('Vulnerability logged → remediation Done, by product', margin, 20);
+      doc.text(`Generated: ${now}`, pageW - margin, 20, { align: 'right' });
+      y = 33;
+
+      // ── Overall KPIs ─────────────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Overall MTTR', 'Products Tracked', 'Total Remediated Vulns']],
+        body: [[
+          overallMTTR ? `${overallMTTR}d` : '—',
+          rows.filter(r => r.overall !== null).length,
+          totalCount,
+        ]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 10, halign: 'center', fontStyle: 'bold' },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+      });
+      y = getY() + 7;
+
+      // ── Product Summary Table ─────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Product','Avg MTTR','Median','Min','Max','Critical','High','Medium','Low','# Fixed']],
+        body: rows.map(r => [
+          r.name,
+          r.overall !== null ? `${r.overall}d` : '—',
+          r.median  !== null ? `${r.median}d`  : '—',
+          r.min     !== null ? `${r.min}d`      : '—',
+          r.max     !== null ? `${r.max}d`      : '—',
+          r.bySev.Critical !== null ? `${r.bySev.Critical}d` : '—',
+          r.bySev.High     !== null ? `${r.bySev.High}d`     : '—',
+          r.bySev.Medium   !== null ? `${r.bySev.Medium}d`   : '—',
+          r.bySev.Low      !== null ? `${r.bySev.Low}d`      : '—',
+          r.count > 0 ? r.count : '—',
+        ]),
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 7.5, cellPadding: 2 },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255], fontSize: 7.5 },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          // colour the Avg MTTR column (index 1) by threshold
+          if (data.column.index === 1) {
+            const val = parseFloat(String(data.cell.raw).replace('d',''));
+            if (!isNaN(val)) data.cell.styles.textColor = mttrFill(val);
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        theme: 'grid',
+      });
+      y = getY() + 8;
+
+      // ── Per-product vulnerability breakdown ───────────────────────────────────
+      const SEV_TEXT: Record<string, [number,number,number]> = {
+        Critical: [185,28,28], High: [194,65,12], Medium: [161,98,7], Low: [29,78,216],
+      };
+      const SEV_FILL: Record<string, [number,number,number]> = {
+        Critical: [254,226,226], High: [255,237,213], Medium: [254,249,195], Low: [219,234,254],
+      };
+
+      for (const p of PLANVIEW_PRODUCTS) {
+        const pRows = vulnMTTRRows.filter(v => v.product === p.name);
+        if (pRows.length === 0) continue;
+
+        const avgDays = Math.round(pRows.reduce((s,r)=>s+r.days,0)/pRows.length * 10)/10;
+
+        autoTable(doc, {
+          startY: y,
+          head: [[{
+            content: `${p.icon}  ${p.name}   —   Avg MTTR: ${avgDays}d   (${pRows.length} vulnerabilit${pRows.length===1?'y':'ies'} remediated)`,
+            colSpan: 6,
+            styles: { fillColor: [30,41,59], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+          }],
+          ['Vuln ID','Title','Severity','Logged','Remediated','Days']],
+          body: pRows
+            .sort((a,b) => b.days - a.days)
+            .map(v => [
+              v.vulnId,
+              v.title.length > 45 ? v.title.slice(0,45) + '…' : v.title,
+              v.sev,
+              v.dateLogged,
+              v.dateRemediated,
+              `${v.days}d`,
+            ]),
+          columnStyles: {
+            0: { cellWidth: 22 },
+            1: { cellWidth: 68 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 22 },
+            4: { cellWidth: 24 },
+            5: { cellWidth: 16, halign: 'right', fontStyle: 'bold' },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          headStyles: { fillColor: [51,65,85], textColor: [203,213,225], fontSize: 7.5 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          didParseCell: (data: any) => {
+            if (data.section !== 'body') return;
+            // Severity column colour
+            if (data.column.index === 2) {
+              const s = String(data.cell.raw);
+              if (SEV_TEXT[s]) {
+                data.cell.styles.textColor = SEV_TEXT[s];
+                data.cell.styles.fillColor = SEV_FILL[s];
+                data.cell.styles.fontStyle = 'bold';
+              }
+            }
+            // Days column colour by threshold
+            if (data.column.index === 5) {
+              const d = parseFloat(String(data.cell.raw).replace('d',''));
+              if (!isNaN(d)) data.cell.styles.textColor = mttrFill(d);
+            }
+          },
+          theme: 'grid',
+        });
+        y = getY() + 5;
+      }
+
+      doc.save('mttr-by-product-report.pdf');
+    }
+
     return (
       <div>
-        <div className="mb-5">
+        <div className="flex items-center justify-between mb-5">
+          <div>
           <h2 className="text-white font-bold text-lg">MTTR by Product</h2>
           <p className="text-slate-400 text-sm mt-0.5">Mean time to remediate — logged to Done, by product and severity</p>
+          </div>
+          <ExportPdfBtn onClick={() => { void exportPDF(); }} />
         </div>
         <div className="grid grid-cols-3 gap-4 mb-6">
           <KpiCard label="Overall MTTR"     value={overallMTTR ? `${overallMTTR}d` : '—'} color={mttrColor(overallMTTR ? parseFloat(overallMTTR) : null)} sub="Across all products" />
@@ -986,6 +1464,52 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Per-product vulnerability breakdown */}
+        {vulnMTTRRows.length > 0 && (
+          <div className="mt-8 space-y-4">
+            <h3 className="text-white font-semibold text-sm px-1">Vulnerability Breakdown by Product</h3>
+            {PLANVIEW_PRODUCTS.map(p => {
+              const pRows = vulnMTTRRows.filter(v => v.product === p.name).sort((a,b) => b.days - a.days);
+              if (pRows.length === 0) return null;
+              const avg = Math.round(pRows.reduce((s,r)=>s+r.days,0)/pRows.length * 10)/10;
+              return (
+                <div key={p.name} className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
+                  <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800">
+                    <span>{p.icon}</span>
+                    <span className="text-white text-xs font-semibold">{p.name}</span>
+                    <span className={`text-xs font-bold ml-1 ${mttrColor(avg)}`}>Avg: {avg}d</span>
+                    <span className="text-slate-500 text-xs ml-auto">{pRows.length} remediated</span>
+                  </div>
+                  <table className="w-full text-xs min-w-[600px]">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="text-left px-5 py-2 font-medium">Vuln ID</th>
+                        <th className="text-left px-5 py-2 font-medium">Title</th>
+                        <th className="text-left px-5 py-2 font-medium">Severity</th>
+                        <th className="text-left px-5 py-2 font-medium">Logged</th>
+                        <th className="text-left px-5 py-2 font-medium">Remediated</th>
+                        <th className="text-right px-5 py-2 font-medium">Days</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pRows.map(v => (
+                        <tr key={v.vulnId} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
+                          <td className="px-5 py-2 font-mono text-slate-400">{v.vulnId}</td>
+                          <td className="px-5 py-2 text-white max-w-[220px] truncate">{v.title}</td>
+                          <td className="px-5 py-2"><Badge label={v.sev} style={SEV_BADGE[v.sev]} /></td>
+                          <td className="px-5 py-2 text-slate-400">{v.dateLogged}</td>
+                          <td className="px-5 py-2 text-slate-400">{v.dateRemediated}</td>
+                          <td className={`px-5 py-2 text-right font-semibold ${mttrColor(v.days)}`}>{v.days}d</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
@@ -1028,8 +1552,189 @@ export default function ReportsPage() {
       downloadCSV(csv, 'sla-by-product.csv');
     }
 
+    // Enrich SLA rows with daysOpen and breachOverdue for UI and PDF
+    const nowMs = Date.now();
+    type EnrichedSLARow = typeof slaRows[number] & { daysOpen: number; breachOverdue: number | null };
+    const enrichedRows: EnrichedSLARow[] = slaRows.map(r => {
+      const vuln     = vulnById[r.vulnRef];
+      const created  = (vuln?.createdAt as number) ?? 0;
+      const daysOpen = created ? Math.round((nowMs - created) / 86_400_000) : 0;
+      const breachOverdue = r.isBreach ? Math.abs(r.daysToDeadline) : null;
+      return { ...r, daysOpen, breachOverdue };
+    });
+
+    async function exportPDF() {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW  = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = margin;
+      const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const getY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      const SEV_TEXT: Record<string, [number,number,number]> = {
+        Critical:[185,28,28], High:[194,65,12], Medium:[161,98,7], Low:[29,78,216],
+      };
+      const SEV_FILL: Record<string, [number,number,number]> = {
+        Critical:[254,226,226], High:[255,237,213], Medium:[254,249,195], Low:[219,234,254],
+      };
+
+      // ── Header ──────────────────────────────────────────────────────────────
+      doc.setFillColor(15,23,42);
+      doc.rect(0, 0, pageW, 30, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(14); doc.setFont('helvetica','bold');
+      doc.text('SLA Compliance Report — By Product', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica','normal');
+      doc.text(`Critical ≤ 15d · High ≤ 30d · Medium ≤ 90d`, margin, 21);
+      doc.text(`Generated: ${dateStr}`, pageW - margin, 21, { align: 'right' });
+      y = 35;
+
+      // ── Overall KPIs ─────────────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Overall Compliance', 'Total SLA Breaches', 'Worst Product']],
+        body: [[
+          overallPct !== null ? `${overallPct}%  (${overallCompliant}/${overallTotal} on time)` : '—',
+          overallBreaches,
+          worstProduct ? `${worstProduct.name}  —  ${worstProduct.pct ?? 0}%` : '—',
+        ]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 10, halign: 'center', fontStyle: 'bold' },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section === 'body') {
+            if (data.column.index === 0) data.cell.styles.textColor = overallPct !== null && overallPct >= 80 ? [34,197,94] : [239,68,68];
+            if (data.column.index === 1) data.cell.styles.textColor = overallBreaches > 0 ? [239,68,68] : [100,116,139];
+            if (data.column.index === 2) data.cell.styles.textColor = [249,115,22];
+          }
+        },
+      });
+      y = getY() + 7;
+
+      // ── Product Summary Table ─────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Product', 'Tracked', 'Compliant', 'Breaches', 'Pending', 'Compliance %']],
+        body: productRows.map(r => [
+          r.name,
+          r.total,
+          r.onTime,
+          r.breaches,
+          r.pending,
+          r.pct !== null ? `${r.pct}%` : '—',
+        ]),
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          if (data.column.index === 2) data.cell.styles.textColor = [34,197,94];
+          if (data.column.index === 3 && Number(data.cell.raw) > 0) {
+            data.cell.styles.textColor = [239,68,68];
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (data.column.index === 5) {
+            const pct = parseFloat(String(data.cell.raw));
+            data.cell.styles.textColor = pct >= 80 ? [34,197,94] : pct >= 50 ? [234,179,8] : [239,68,68];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        theme: 'grid',
+      });
+      y = getY() + 8;
+
+      // ── Per-product SLA detail ────────────────────────────────────────────────
+      for (const p of PLANVIEW_PRODUCTS) {
+        const pRows = enrichedRows
+          .filter(r => r.product === p.name)
+          .sort((a, b) => {
+            // Breaches first (worst first), then pending by deadline, then compliant
+            if (a.isBreach && !b.isBreach) return -1;
+            if (!a.isBreach && b.isBreach) return 1;
+            return a.daysToDeadline - b.daysToDeadline;
+          });
+        if (pRows.length === 0) continue;
+
+        const pBreaches  = pRows.filter(r => r.isBreach).length;
+        const pCompliant = pRows.filter(r => r.isOnTime).length;
+        const pPct       = Math.round((pCompliant / pRows.length) * 100);
+        const pctFill: [number,number,number] = pPct >= 80 ? [220,252,231] : pPct >= 50 ? [254,249,195] : [254,226,226];
+        const pctText: [number,number,number] = pPct >= 80 ? [22,101,52]  : pPct >= 50 ? [113,63,18]    : [153,27,27];
+
+        autoTable(doc, {
+          startY: y,
+          head: [
+            [{
+              content: `${p.name}   —   ${pPct}% Compliant  |  ${pBreaches} Breach${pBreaches !== 1 ? 'es' : ''}  |  ${pRows.length} Tracked`,
+              colSpan: 7,
+              styles: { fillColor: pctFill, textColor: pctText, fontStyle: 'bold', fontSize: 9 },
+            }],
+            ['Vuln ID', 'Title', 'Severity', 'SLA Deadline', 'Days Open', 'Breach Overdue', 'Result'],
+          ],
+          body: pRows.map(r => [
+            r.vulnId,
+            r.title.length > 38 ? r.title.slice(0, 38) + '…' : r.title,
+            r.sev ?? '—',
+            r.slaDeadline ? new Date(r.slaDeadline).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '—',
+            `${r.daysOpen}d`,
+            r.breachOverdue !== null ? `${r.breachOverdue}d overdue` : '—',
+            r.isOnTime ? 'Compliant' : r.isBreach ? 'BREACH' : 'Pending',
+          ]),
+          columnStyles: {
+            0: { cellWidth: 22 },
+            1: { cellWidth: 52 },
+            2: { cellWidth: 18 },
+            3: { cellWidth: 24 },
+            4: { cellWidth: 18, halign: 'right' },
+            5: { cellWidth: 24, halign: 'right' },
+            6: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          headStyles: { fillColor: [51,65,85], textColor: [203,213,225], fontSize: 7.5 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          didParseCell: (data: any) => {
+            if (data.section !== 'body') return;
+            // Severity colour
+            if (data.column.index === 2) {
+              const s = String(data.cell.raw);
+              if (SEV_TEXT[s]) { data.cell.styles.textColor = SEV_TEXT[s]; data.cell.styles.fillColor = SEV_FILL[s]; data.cell.styles.fontStyle = 'bold'; }
+            }
+            // Days open: red if > SLA threshold
+            if (data.column.index === 4) {
+              const d = parseFloat(String(data.cell.raw));
+              const rowData = pRows[data.row.index];
+              const threshold = SLA_DAYS[rowData?.sev ?? ''] ?? 999;
+              if (!rowData?.isResolved && d > threshold) data.cell.styles.textColor = [239,68,68];
+            }
+            // Breach overdue — always red
+            if (data.column.index === 5 && String(data.cell.raw) !== '—') {
+              data.cell.styles.textColor = [239,68,68];
+              data.cell.styles.fontStyle = 'bold';
+            }
+            // Result column colour
+            if (data.column.index === 6) {
+              const v = String(data.cell.raw);
+              if (v === 'Compliant') data.cell.styles.textColor = [34,197,94];
+              else if (v === 'BREACH') { data.cell.styles.textColor = [239,68,68]; data.cell.styles.fillColor = [254,226,226]; }
+              else data.cell.styles.textColor = [148,163,184];
+            }
+          },
+          theme: 'grid',
+        });
+        y = getY() + 5;
+      }
+
+      doc.save('sla-by-product-report.pdf');
+    }
+
     // Breach detail rows for the selected product (if any) — show all breaches
-    const breachRows = slaRows.filter(r => r.isBreach || r.isOnTime).sort((a,b) => a.daysToDeadline - b.daysToDeadline);
+    const breachRows = enrichedRows.filter(r => r.isBreach || r.isOnTime).sort((a,b) => a.daysToDeadline - b.daysToDeadline);
 
     return (
       <div>
@@ -1038,7 +1743,10 @@ export default function ReportsPage() {
             <h2 className="text-white font-bold text-lg">SLA Compliance by Product</h2>
             <p className="text-slate-400 text-sm mt-0.5">SLA thresholds — Critical: {SLA_DAYS.Critical}d · High: {SLA_DAYS.High}d · Medium: {SLA_DAYS.Medium}d · Low: {SLA_DAYS.Low}d</p>
           </div>
-          <ExportBtn onClick={exportCSV} />
+          <div className="flex items-center gap-2">
+            <ExportBtn onClick={exportCSV} />
+            <ExportPdfBtn onClick={() => { void exportPDF(); }} />
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-6">
           <KpiCard label="Overall Compliance" value={overallPct !== null ? `${overallPct}%` : '—'} color={overallPct !== null && overallPct >= 80 ? 'text-green-400' : 'text-red-400'} sub={`${overallCompliant}/${overallTotal} on time`} />
@@ -1093,43 +1801,68 @@ export default function ReportsPage() {
           </table>
         </div>
 
-        {/* Breach detail */}
-        {breachRows.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mt-6">
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="text-white font-semibold text-sm">Breach & Compliance Detail</h3>
-              <span className="text-xs text-slate-500">{breachRows.length} records</span>
-            </div>
-            <table className="w-full text-sm min-w-[700px]">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 text-xs">
-                  {['Vuln ID','Title','Product','Severity','SLA Deadline','Days','Result'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {breachRows.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{r.vulnId}</td>
-                    <td className="px-4 py-3 text-white text-xs max-w-[140px] truncate">{r.title}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{r.product}</td>
-                    <td className="px-4 py-3">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{r.slaDeadline}</td>
-                    <td className={`px-4 py-3 text-xs font-medium ${r.isBreach ? 'text-red-400' : r.daysToDeadline < 7 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                      {r.isBreach ? `${Math.abs(r.daysToDeadline)}d overdue` : r.daysToDeadline >= 0 ? `${r.daysToDeadline}d left` : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.isOnTime ? <Badge label="Compliant" style="bg-green-500/10 text-green-400 border-green-500/20" />
-                        : r.isBreach ? <Badge label="Breach" style="bg-red-500/10 text-red-400 border-red-500/20" />
-                        : <Badge label="Pending" style="bg-slate-700 text-slate-300 border-slate-600" />}
-                    </td>
+        {/* Per-product SLA breakdown */}
+        {PLANVIEW_PRODUCTS.map(p => {
+          const pRows = enrichedRows
+            .filter(r => r.product === p.name)
+            .sort((a,b) => {
+              if (a.isBreach && !b.isBreach) return -1;
+              if (!a.isBreach && b.isBreach) return 1;
+              return a.daysToDeadline - b.daysToDeadline;
+            });
+          if (pRows.length === 0) return null;
+          const pIcon    = PLANVIEW_PRODUCTS.find(x => x.name === p.name)?.icon ?? '';
+          const pBreaches  = pRows.filter(r => r.isBreach).length;
+          const pCompliant = pRows.filter(r => r.isOnTime).length;
+          const pPct       = Math.round((pCompliant / pRows.length) * 100);
+          return (
+            <div key={p.name} className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mt-5">
+              <div className="px-5 py-3 border-b border-slate-800 flex items-center gap-3 flex-wrap">
+                <span>{pIcon}</span>
+                <span className="text-white text-xs font-semibold">{p.name}</span>
+                <span className={`text-xs font-bold ${pPct >= 80 ? 'text-green-400' : pPct >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{pPct}% compliant</span>
+                {pBreaches > 0 && <span className="text-xs text-red-400 font-semibold">{pBreaches} breach{pBreaches !== 1 ? 'es' : ''}</span>}
+                <span className="ml-auto text-xs text-slate-500">{pRows.length} tracked</span>
+              </div>
+              <table className="w-full text-xs min-w-[750px]">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    {['Vuln ID','Title','Severity','SLA Deadline','Days Open','Breach Overdue','Result'].map(h => (
+                      <th key={h} className="text-left px-4 py-2 font-medium">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {/* Suppress unused var warning */}
-        {now > 0 && null}
+                </thead>
+                <tbody>
+                  {pRows.map((r, i) => (
+                    <tr key={i} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition ${r.isBreach ? 'bg-red-500/5' : ''}`}>
+                      <td className="px-4 py-2 font-mono text-slate-400">{r.vulnId}</td>
+                      <td className="px-4 py-2 text-white max-w-[180px] truncate">{r.title}</td>
+                      <td className="px-4 py-2">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
+                      <td className="px-4 py-2 text-slate-400 whitespace-nowrap">
+                        {r.slaDeadline ? new Date(r.slaDeadline).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '—'}
+                      </td>
+                      <td className={`px-4 py-2 font-medium ${!r.isResolved && r.daysOpen > (SLA_DAYS[r.sev ?? ''] ?? 999) ? 'text-red-400' : 'text-slate-400'}`}>
+                        {r.daysOpen}d
+                      </td>
+                      <td className="px-4 py-2 font-semibold">
+                        {r.breachOverdue !== null
+                          ? <span className="text-red-400">{r.breachOverdue}d overdue</span>
+                          : <span className="text-slate-600">—</span>}
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.isOnTime
+                          ? <Badge label="Compliant" style="bg-green-500/10 text-green-400 border-green-500/20" />
+                          : r.isBreach
+                          ? <Badge label="BREACH" style="bg-red-500/20 text-red-300 border-red-500/40" />
+                          : <Badge label="Pending" style="bg-slate-700 text-slate-300 border-slate-600" />}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1157,10 +1890,184 @@ export default function ReportsPage() {
     }
     const sevCompData = Object.entries(slaBySev).filter(([,d])=>d.total>0).map(([name,d])=>({ name, 'Compliance %': Math.round((d.onTime/d.total)*100) }));
 
+    // SLA thresholds per severity (days): Critical=15, High=30, Medium=90, Low=best-effort
+    const SLA_THRESHOLD: Record<string, number> = { Critical: 15, High: 30, Medium: 90, Low: 9999 };
+
+    // Enrich with daysOpen and breachOverdue
+    const nowMs2 = Date.now();
+    type ESRow = typeof slaRows[number] & { daysOpen: number; breachOverdue: number | null };
+    const enrichedSevRows: ESRow[] = slaRows.map(r => {
+      const vuln     = vulnById[r.vulnRef];
+      const created  = (vuln?.createdAt as number) ?? 0;
+      const daysOpen = created ? Math.round((nowMs2 - created) / 86_400_000) : 0;
+      const breachOverdue = r.isBreach ? Math.abs(r.daysToDeadline) : null;
+      return { ...r, daysOpen, breachOverdue };
+    });
+
     function exportCSV() {
-      const csv: (string | number)[][] = [['Vuln ID','Title','Product','Severity','SLA Deadline','Status','Days to Deadline','Compliant']];
-      for (const r of slaRows) csv.push([r.vulnId, r.title, r.product, r.sev ?? '—', r.slaDeadline, r.status, r.daysToDeadline, r.isOnTime ? 'Yes' : r.isBreach ? 'Breach' : 'Pending']);
+      const csv: (string | number)[][] = [['Vuln ID','Title','Product','Severity','SLA Deadline','Days Open','Breach Overdue','Result']];
+      for (const r of enrichedSevRows) csv.push([r.vulnId, r.title, r.product, r.sev ?? '—', r.slaDeadline, `${r.daysOpen}d`, r.breachOverdue !== null ? `${r.breachOverdue}d overdue` : '—', r.isOnTime ? 'Compliant' : r.isBreach ? 'BREACH' : 'Pending']);
       downloadCSV(csv, 'sla-by-severity.csv');
+    }
+
+    async function exportPDF() {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW  = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = margin;
+      const dateStr = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+      const getY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      const SEV_TEXT_PDF: Record<string, [number,number,number]> = {
+        Critical:[185,28,28], High:[194,65,12], Medium:[161,98,7], Low:[29,78,216],
+      };
+      const SEV_FILL_PDF: Record<string, [number,number,number]> = {
+        Critical:[254,226,226], High:[255,237,213], Medium:[254,249,195], Low:[219,234,254],
+      };
+      const SEV_HEADER_FILL: Record<string, [number,number,number]> = {
+        Critical:[220,38,38], High:[234,88,12], Medium:[202,138,4], Low:[37,99,235],
+      };
+
+      // ── Header ──────────────────────────────────────────────────────────────
+      doc.setFillColor(15,23,42);
+      doc.rect(0, 0, pageW, 30, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(14); doc.setFont('helvetica','bold');
+      doc.text('SLA Compliance Report — By Severity', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica','normal');
+      doc.text('Critical ≤ 15d · High ≤ 30d · Medium ≤ 90d · Low — Best effort', margin, 21);
+      doc.text(`Generated: ${dateStr}`, pageW - margin, 21, { align: 'right' });
+      y = 35;
+
+      // ── Overall KPIs ─────────────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Overall Compliance', 'Total Tracked', 'Compliant', 'SLA Breaches']],
+        body: [[
+          compPct !== null ? `${compPct}%` : '—',
+          total, compliant, breaches,
+        ]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 10, halign: 'center', fontStyle: 'bold' },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          if (data.column.index === 0) data.cell.styles.textColor = compPct !== null && compPct >= 80 ? [34,197,94] : [239,68,68];
+          if (data.column.index === 2) data.cell.styles.textColor = [34,197,94];
+          if (data.column.index === 3) data.cell.styles.textColor = breaches > 0 ? [239,68,68] : [100,116,139];
+        },
+      });
+      y = getY() + 7;
+
+      // ── Per-severity summary row ──────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Severity', 'SLA Threshold', 'Tracked', 'Compliant', 'Breaches', 'Compliance %']],
+        body: (['Critical','High','Medium','Low'] as const).map(sev => {
+          const d   = slaBySev[sev];
+          const pct = d.total > 0 ? Math.round((d.onTime / d.total) * 100) : null;
+          return [sev, `${SLA_THRESHOLD[sev] === 9999 ? 'Best effort' : SLA_THRESHOLD[sev] + 'd'}`, d.total, d.onTime, d.total - d.onTime, pct !== null ? `${pct}%` : '—'];
+        }),
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          const sev = ['Critical','High','Medium','Low'][data.row.index];
+          if (data.column.index === 0 && sev) {
+            data.cell.styles.textColor = SEV_TEXT_PDF[sev];
+            data.cell.styles.fillColor = SEV_FILL_PDF[sev];
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (data.column.index === 4 && Number(data.cell.raw) > 0) {
+            data.cell.styles.textColor = [239,68,68]; data.cell.styles.fontStyle = 'bold';
+          }
+          if (data.column.index === 5) {
+            const pct = parseFloat(String(data.cell.raw));
+            data.cell.styles.textColor = pct >= 80 ? [34,197,94] : pct >= 50 ? [234,179,8] : [239,68,68];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        theme: 'grid',
+      });
+      y = getY() + 8;
+
+      // ── Per-severity detailed breakdown ───────────────────────────────────────
+      for (const sev of ['Critical','High','Medium','Low'] as const) {
+        const sevRows = enrichedSevRows
+          .filter(r => r.sev === sev)
+          .sort((a,b) => {
+            if (a.isBreach && !b.isBreach) return -1;
+            if (!a.isBreach && b.isBreach) return 1;
+            return a.daysToDeadline - b.daysToDeadline;
+          });
+        if (sevRows.length === 0) continue;
+
+        const sevCompliant = sevRows.filter(r => r.isOnTime).length;
+        const sevBreaches  = sevRows.filter(r => r.isBreach).length;
+        const sevPct       = Math.round((sevCompliant / sevRows.length) * 100);
+        const threshold    = SLA_THRESHOLD[sev];
+
+        autoTable(doc, {
+          startY: y,
+          head: [
+            [{
+              content: `${sev}   —   SLA: ${threshold === 9999 ? 'Best effort' : threshold + 'd'}   |   ${sevPct}% Compliant  |  ${sevBreaches} Breach${sevBreaches !== 1 ? 'es' : ''}  |  ${sevRows.length} Tracked`,
+              colSpan: 7,
+              styles: { fillColor: SEV_HEADER_FILL[sev], textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+            }],
+            ['Vuln ID','Title','Product','SLA Deadline','Days Open','Breach Overdue','Result'],
+          ],
+          body: sevRows.map(r => [
+            r.vulnId,
+            r.title.length > 38 ? r.title.slice(0,38) + '…' : r.title,
+            r.product,
+            r.slaDeadline ? new Date(r.slaDeadline).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '—',
+            `${r.daysOpen}d`,
+            r.breachOverdue !== null ? `${r.breachOverdue}d overdue` : '—',
+            r.isOnTime ? 'Compliant' : r.isBreach ? 'BREACH' : 'Pending',
+          ]),
+          columnStyles: {
+            0: { cellWidth: 22 },
+            1: { cellWidth: 52 },
+            2: { cellWidth: 22 },
+            3: { cellWidth: 24 },
+            4: { cellWidth: 16, halign: 'right' },
+            5: { cellWidth: 24, halign: 'right' },
+            6: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          headStyles: { fillColor: [51,65,85], textColor: [203,213,225], fontSize: 7.5 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          didParseCell: (data: any) => {
+            if (data.section !== 'body') return;
+            if (data.column.index === 4) {
+              const d = parseFloat(String(data.cell.raw));
+              const row = sevRows[data.row.index];
+              if (!row?.isResolved && !isNaN(d) && d > threshold) data.cell.styles.textColor = [239,68,68];
+            }
+            if (data.column.index === 5 && String(data.cell.raw) !== '—') {
+              data.cell.styles.textColor = [239,68,68]; data.cell.styles.fontStyle = 'bold';
+            }
+            if (data.column.index === 6) {
+              const v = String(data.cell.raw);
+              if (v === 'Compliant') data.cell.styles.textColor = [34,197,94];
+              else if (v === 'BREACH') { data.cell.styles.textColor = [239,68,68]; data.cell.styles.fillColor = [254,226,226]; }
+              else data.cell.styles.textColor = [148,163,184];
+            }
+          },
+          theme: 'grid',
+        });
+        y = getY() + 5;
+      }
+
+      doc.save('sla-by-severity-report.pdf');
     }
 
     return (
@@ -1169,10 +2076,13 @@ export default function ReportsPage() {
           <div>
             <h2 className="text-white font-bold text-lg">SLA Compliance by Severity</h2>
             <p className="text-slate-400 text-sm mt-0.5">
-              Thresholds — Critical: {SLA_DAYS.Critical}d · High: {SLA_DAYS.High}d · Medium: {SLA_DAYS.Medium}d · Low: {SLA_DAYS.Low}d
+              Thresholds — Critical: 15d · High: 30d · Medium: 90d · Low: Best effort
             </p>
           </div>
-          <ExportBtn onClick={exportCSV} />
+          <div className="flex items-center gap-2">
+            <ExportBtn onClick={exportCSV} />
+            <ExportPdfBtn onClick={() => { void exportPDF(); }} />
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-4 mb-6">
           <KpiCard label="Overall Compliance" value={compPct !== null ? `${compPct}%` : '—'} color={compPct !== null && compPct >= 80 ? 'text-green-400' : 'text-red-400'} />
@@ -1225,37 +2135,64 @@ export default function ReportsPage() {
           </ChartCard>
         </div>
 
-        {slaRows.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 text-xs">
-                  {['Vuln ID','Title','Product','Severity','SLA Deadline','Status','Days','Result'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {[...slaRows].sort((a,b) => a.daysToDeadline - b.daysToDeadline).map((r,i) => (
-                  <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{r.vulnId}</td>
-                    <td className="px-4 py-3 text-white text-xs max-w-[140px] truncate">{r.title}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{r.product}</td>
-                    <td className="px-4 py-3">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{r.slaDeadline}</td>
-                    <td className="px-4 py-3"><Badge label={r.status} style={STATUS_BADGE[r.status]} /></td>
-                    <td className={`px-4 py-3 text-xs font-medium ${r.isBreach ? 'text-red-400' : r.daysToDeadline < 7 ? 'text-yellow-400' : 'text-slate-400'}`}>
-                      {r.isBreach ? `${Math.abs(r.daysToDeadline)}d overdue` : r.daysToDeadline >= 0 ? `${r.daysToDeadline}d left` : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.isOnTime ? <Badge label="Compliant" style="bg-green-500/10 text-green-400 border-green-500/20" />
-                        : r.isBreach ? <Badge label="Breach" style="bg-red-500/10 text-red-400 border-red-500/20" />
-                        : <Badge label="Pending" style="bg-slate-700 text-slate-300 border-slate-600" />}
-                    </td>
+        {/* Per-severity breakdown */}
+        {(['Critical','High','Medium','Low'] as const).map(sev => {
+          const sevRows = enrichedSevRows
+            .filter(r => r.sev === sev)
+            .sort((a,b) => { if (a.isBreach && !b.isBreach) return -1; if (!a.isBreach && b.isBreach) return 1; return a.daysToDeadline - b.daysToDeadline; });
+          if (sevRows.length === 0) return null;
+          const sevCompliant = sevRows.filter(r => r.isOnTime).length;
+          const sevBreaches  = sevRows.filter(r => r.isBreach).length;
+          const sevPct       = Math.round((sevCompliant / sevRows.length) * 100);
+          const threshold    = SLA_THRESHOLD[sev];
+          return (
+            <div key={sev} className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto mt-5">
+              <div className="px-5 py-3 border-b border-slate-800 flex items-center gap-3 flex-wrap">
+                <Badge label={sev} style={SEV_BADGE[sev]} />
+                <span className="text-slate-400 text-xs">SLA: {threshold === 9999 ? 'Best effort' : `${threshold}d`}</span>
+                <span className={`text-xs font-bold ${sevPct >= 80 ? 'text-green-400' : sevPct >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{sevPct}% compliant</span>
+                {sevBreaches > 0 && <span className="text-xs text-red-400 font-semibold">{sevBreaches} breach{sevBreaches !== 1 ? 'es' : ''}</span>}
+                <span className="ml-auto text-xs text-slate-500">{sevRows.length} tracked</span>
+              </div>
+              <table className="w-full text-xs min-w-[750px]">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    {['Vuln ID','Title','Product','SLA Deadline','Days Open','Breach Overdue','Result'].map(h => (
+                      <th key={h} className="text-left px-4 py-2 font-medium">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {sevRows.map((r, i) => (
+                    <tr key={i} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition ${r.isBreach ? 'bg-red-500/5' : ''}`}>
+                      <td className="px-4 py-2 font-mono text-slate-400">{r.vulnId}</td>
+                      <td className="px-4 py-2 text-white max-w-[180px] truncate">{r.title}</td>
+                      <td className="px-4 py-2 text-slate-400">{r.product}</td>
+                      <td className="px-4 py-2 text-slate-400 whitespace-nowrap">
+                        {r.slaDeadline ? new Date(r.slaDeadline).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '—'}
+                      </td>
+                      <td className={`px-4 py-2 font-medium ${!r.isResolved && r.daysOpen > threshold ? 'text-red-400' : 'text-slate-400'}`}>
+                        {r.daysOpen}d
+                      </td>
+                      <td className="px-4 py-2 font-semibold">
+                        {r.breachOverdue !== null
+                          ? <span className="text-red-400">{r.breachOverdue}d overdue</span>
+                          : <span className="text-slate-600">—</span>}
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.isOnTime
+                          ? <Badge label="Compliant" style="bg-green-500/10 text-green-400 border-green-500/20" />
+                          : r.isBreach
+                          ? <Badge label="BREACH" style="bg-red-500/20 text-red-300 border-red-500/40" />
+                          : <Badge label="Pending" style="bg-slate-700 text-slate-300 border-slate-600" />}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1300,14 +2237,224 @@ export default function ReportsPage() {
       .map(v => {
         const vid  = (v as { id: string }).id;
         const days = daysOpen(v.createdAt as number);
-        return { v, vid, days, sev: globalSevByVuln[vid], bucket: ageBucket(days), impactedCount: (impactedProductsByVuln[vid] ?? []).length };
+        const products = impactedProductsByVuln[vid] ?? [];
+        return { v, vid, days, sev: globalSevByVuln[vid], bucket: ageBucket(days), products };
       });
+
+    // Per-product breakdown: which open vulns are open for each product and how long
+    const perProductRows = PLANVIEW_PRODUCTS.map(p => {
+      const rows = allPAs
+        .filter(pa => (pa.productName as string) === p.name && (pa.impactStatus as string) === 'Impacted')
+        .flatMap(pa => {
+          const vuln = vulnById[pa.vulnerabilityRef as string];
+          if (!vuln || vuln.status === 'Remediated' || vuln.status === 'Closed') return [];
+          if (!openVulns.find(v => (v as { id: string }).id === (pa.vulnerabilityRef as string))) return [];
+          const days = daysOpen(vuln.createdAt as number);
+          const sev  = globalSevByVuln[(pa.vulnerabilityRef as string)];
+          return [{ vuln, days, sev, bucket: ageBucket(days) }];
+        })
+        .sort((a,b) => b.days - a.days);
+      return { ...p, rows };
+    }).filter(p => p.rows.length > 0);
+
+    async function exportPDF() {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW  = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = margin;
+      const dateStr = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+      const getY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+      const BUCKET_PDF_FILL: Record<string, [number,number,number]> = {
+        '< 30d':  [220,252,231], '30–60d': [254,249,195],
+        '60–90d': [255,237,213], '> 90d':  [254,226,226],
+      };
+      const BUCKET_PDF_TEXT: Record<string, [number,number,number]> = {
+        '< 30d':  [22,101,52],  '30–60d': [113,63,18],
+        '60–90d': [154,52,18],  '> 90d':  [153,27,27],
+      };
+      const SEV_TEXT_PDF: Record<string, [number,number,number]> = {
+        Critical:[185,28,28], High:[194,65,12], Medium:[161,98,7], Low:[29,78,216],
+      };
+      const SEV_FILL_PDF: Record<string, [number,number,number]> = {
+        Critical:[254,226,226], High:[255,237,213], Medium:[254,249,195], Low:[219,234,254],
+      };
+
+      // ── Header ──────────────────────────────────────────────────────────────
+      doc.setFillColor(15,23,42);
+      doc.rect(0, 0, pageW, 28, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(14); doc.setFont('helvetica','bold');
+      doc.text('Open Vulnerability Aging Report', margin, 12);
+      doc.setFontSize(9); doc.setFont('helvetica','normal');
+      doc.text(`${total} open vulnerabilities — last 12 months`, margin, 20);
+      doc.text(`Generated: ${dateStr}`, pageW - margin, 20, { align: 'right' });
+      y = 33;
+
+      // ── Overall KPIs ─────────────────────────────────────────────────────────
+      autoTable(doc, {
+        startY: y,
+        head: [['Total Open', '> 30 Days', '> 60 Days', '> 90 Days']],
+        body: [[total, gt30, gt60, gt90]],
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 11, halign: 'center', fontStyle: 'bold' },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          if (data.column.index === 1 && gt30  > 0) data.cell.styles.textColor = [234,179,8];
+          if (data.column.index === 2 && gt60  > 0) data.cell.styles.textColor = [249,115,22];
+          if (data.column.index === 3 && gt90  > 0) data.cell.styles.textColor = [239,68,68];
+        },
+      });
+      y = getY() + 8;
+
+      // ── Section 1: Age Buckets by Product ────────────────────────────────────
+      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,41,59);
+      doc.text('Age Buckets by Product', margin, y);
+      y += 4;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Product', '< 30d', '30–60d', '60–90d', '> 90d', 'Total Open']],
+        body: PLANVIEW_PRODUCTS.map(p => {
+          const pData = productChartData.find(r => r.name === p.name);
+          const c1 = (pData?.['< 30d']  as number) ?? 0;
+          const c2 = (pData?.['30–60d'] as number) ?? 0;
+          const c3 = (pData?.['60–90d'] as number) ?? 0;
+          const c4 = (pData?.['> 90d']  as number) ?? 0;
+          const tot = c1 + c2 + c3 + c4;
+          return [p.name, c1 || '—', c2 || '—', c3 || '—', c4 || '—', tot || '—'];
+        }).filter(r => r[5] !== '—'),
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 8, cellPadding: 2.5, halign: 'center' },
+        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body' || data.column.index === 0 || data.cell.raw === '—') return;
+          const buckets = ['< 30d','30–60d','60–90d','> 90d'];
+          const b = buckets[data.column.index - 1];
+          if (b && Number(data.cell.raw) > 0) {
+            data.cell.styles.textColor = BUCKET_PDF_TEXT[b];
+            data.cell.styles.fillColor = BUCKET_PDF_FILL[b];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        theme: 'grid',
+      });
+      y = getY() + 8;
+
+      // ── Section 2: Age Buckets by Severity ───────────────────────────────────
+      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,41,59);
+      doc.text('Age Buckets by Severity', margin, y);
+      y += 4;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Severity', '< 30d', '30–60d', '60–90d', '> 90d', 'Total Open']],
+        body: SEVERITIES.map(sev => {
+          const sData = sevChartData.find(r => r.name === sev);
+          const c1 = (sData?.['< 30d']  as number) ?? 0;
+          const c2 = (sData?.['30–60d'] as number) ?? 0;
+          const c3 = (sData?.['60–90d'] as number) ?? 0;
+          const c4 = (sData?.['> 90d']  as number) ?? 0;
+          const tot = c1 + c2 + c3 + c4;
+          return [sev, c1 || '—', c2 || '—', c3 || '—', c4 || '—', tot || '—'];
+        }).filter(r => r[5] !== '—'),
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 8, cellPadding: 2.5, halign: 'center' },
+        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+        headStyles: { fillColor: [30,41,59], textColor: [255,255,255] },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return;
+          // Severity column
+          if (data.column.index === 0) {
+            const sev = String(data.cell.raw);
+            if (SEV_TEXT_PDF[sev]) { data.cell.styles.textColor = SEV_TEXT_PDF[sev]; data.cell.styles.fillColor = SEV_FILL_PDF[sev]; data.cell.styles.fontStyle = 'bold'; }
+          }
+          if (data.column.index > 0 && data.cell.raw !== '—') {
+            const buckets = ['< 30d','30–60d','60–90d','> 90d'];
+            const b = buckets[data.column.index - 1];
+            if (b && Number(data.cell.raw) > 0) {
+              data.cell.styles.textColor = BUCKET_PDF_TEXT[b];
+              data.cell.styles.fillColor = BUCKET_PDF_FILL[b];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        },
+        theme: 'grid',
+      });
+      y = getY() + 10;
+
+      // ── Section 3: Per-Product Open Vulnerability Detail ─────────────────────
+      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,41,59);
+      doc.text('Open Vulnerabilities by Product', margin, y);
+      y += 5;
+
+      for (const p of perProductRows) {
+        const oldest = p.rows[0]?.days ?? 0;
+        const agingColor: [number,number,number] = oldest > 90 ? [239,68,68] : oldest > 60 ? [249,115,22] : oldest > 30 ? [234,179,8] : [34,197,94];
+
+        autoTable(doc, {
+          startY: y,
+          head: [
+            [{
+              content: `${p.icon}  ${p.name}   —   ${p.rows.length} open vulnerabilit${p.rows.length===1?'y':'ies'}   |   Oldest: ${oldest}d`,
+              colSpan: 5,
+              styles: { fillColor: [30,41,59], textColor: agingColor, fontStyle: 'bold', fontSize: 9 },
+            }],
+            ['Vuln ID', 'Title', 'Severity', 'Status', 'Days Open'],
+          ],
+          body: p.rows.map(r => [
+            r.vuln.vulnerabilityId as string,
+            (r.vuln.title as string).length > 55 ? (r.vuln.title as string).slice(0,55) + '…' : r.vuln.title as string,
+            r.sev ?? '—',
+            (r.vuln.status as string) ?? 'Open',
+            `${r.days}d  [${r.bucket}]`,
+          ]),
+          columnStyles: {
+            0: { cellWidth: 24 },
+            1: { cellWidth: 76 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 28 },
+            4: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+          },
+          margin: { left: margin, right: margin },
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          headStyles: { fillColor: [51,65,85], textColor: [203,213,225], fontSize: 7.5 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          didParseCell: (data: any) => {
+            if (data.section !== 'body') return;
+            if (data.column.index === 2) {
+              const sev = String(data.cell.raw);
+              if (SEV_TEXT_PDF[sev]) { data.cell.styles.textColor = SEV_TEXT_PDF[sev]; data.cell.styles.fillColor = SEV_FILL_PDF[sev]; data.cell.styles.fontStyle = 'bold'; }
+            }
+            if (data.column.index === 4) {
+              const d = parseFloat(String(data.cell.raw));
+              data.cell.styles.textColor = d > 90 ? [239,68,68] : d > 60 ? [249,115,22] : d > 30 ? [234,179,8] : [34,197,94];
+            }
+          },
+          theme: 'grid',
+        });
+        y = getY() + 4;
+      }
+
+      doc.save('open-vulnerability-aging-report.pdf');
+    }
 
     return (
       <div>
-        <div className="mb-5">
+        <div className="flex items-center justify-between mb-5">
+          <div>
           <h2 className="text-white font-bold text-lg">Open Vulnerability Aging</h2>
           <p className="text-slate-400 text-sm mt-0.5">How long open vulnerabilities have been unresolved</p>
+          </div>
+          <ExportPdfBtn onClick={() => { void exportPDF(); }} />
         </div>
         <div className="grid grid-cols-4 gap-4 mb-6">
           <KpiCard label="Total Open" value={total} color="text-white" />
@@ -1359,13 +2506,53 @@ export default function ReportsPage() {
                     <td className="px-4 py-3 text-white text-xs max-w-[180px] truncate">{r.v.title as string}</td>
                     <td className="px-4 py-3">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
                     <td className="px-4 py-3"><Badge label={(r.v.status as string) ?? 'Open'} style={STATUS_BADGE[(r.v.status as string) ?? 'Open']} /></td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{r.impactedCount > 0 ? r.impactedCount : <Dash />}</td>
+                    <td className="px-4 py-3 text-xs text-slate-400">{r.products.length > 0 ? r.products.length : <Dash />}</td>
                     <td className={`px-4 py-3 text-xs font-semibold ${r.days > 90 ? 'text-red-400' : r.days > 60 ? 'text-orange-400' : r.days > 30 ? 'text-yellow-400' : 'text-slate-400'}`}>{r.days}d</td>
                     <td className="px-4 py-3"><Badge label={r.bucket} style={AGE_BUCKET_STYLE[r.bucket]} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {perProductRows.length > 0 && (
+          <div className="mt-6 space-y-4">
+            <h3 className="text-white font-semibold text-sm">Open Vulnerabilities by Product</h3>
+            {perProductRows.map(p => (
+              <div key={p.name} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-800/40">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{p.icon}</span>
+                    <span className="text-white font-semibold text-sm">{p.name}</span>
+                    <span className="text-slate-400 text-xs ml-1">{p.rows.length} open</span>
+                  </div>
+                  <span className={`text-xs font-semibold ${p.rows[0]?.days > 90 ? 'text-red-400' : p.rows[0]?.days > 60 ? 'text-orange-400' : p.rows[0]?.days > 30 ? 'text-yellow-400' : 'text-slate-400'}`}>
+                    Oldest: {p.rows[0]?.days ?? 0}d
+                  </span>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 text-xs">
+                      {['Vuln ID','Title','Severity','Status','Days Open','Age Bucket'].map(h => (
+                        <th key={h} className="text-left px-4 py-2 font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.rows.map((r, i) => (
+                      <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
+                        <td className="px-4 py-2 font-mono text-xs text-slate-400">{r.vuln.vulnerabilityId as string}</td>
+                        <td className="px-4 py-2 text-white text-xs max-w-[200px] truncate">{r.vuln.title as string}</td>
+                        <td className="px-4 py-2">{r.sev ? <Badge label={r.sev} style={SEV_BADGE[r.sev]} /> : <Dash />}</td>
+                        <td className="px-4 py-2"><Badge label={(r.vuln.status as string) ?? 'Open'} style={STATUS_BADGE[(r.vuln.status as string) ?? 'Open']} /></td>
+                        <td className={`px-4 py-2 text-xs font-semibold ${r.days > 90 ? 'text-red-400' : r.days > 60 ? 'text-orange-400' : r.days > 30 ? 'text-yellow-400' : 'text-slate-400'}`}>{r.days}d</td>
+                        <td className="px-4 py-2"><Badge label={r.bucket} style={AGE_BUCKET_STYLE[r.bucket]} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -1639,11 +2826,11 @@ export default function ReportsPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  // Section icons (inline SVG-free approach using text glyphs)
-  const SECTION_ICONS: Record<ActiveSection, string> = {
-    products:        '🏢',
-    vulnerabilities: '⚠️',
-    kpis:            '📊',
+  // Section icons – matching main nav icons
+  const SECTION_ICONS: Record<ActiveSection, ReactNode> = {
+    products:        <Boxes       size={16} className="shrink-0" />,
+    vulnerabilities: <ShieldAlert size={16} className="shrink-0" />,
+    kpis:            <BarChart3   size={16} className="shrink-0" />,
   };
 
   // Section descriptions shown in the filter bar header
@@ -1685,7 +2872,7 @@ export default function ReportsPage() {
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
-                      <span className="text-base leading-none">{SECTION_ICONS[section]}</span>
+                      {SECTION_ICONS[section]}
                       <span>{section === 'products' ? 'Products' : section === 'vulnerabilities' ? 'Vulnerabilities' : 'KPIs'}</span>
                     </span>
                     <span className={`text-slate-400 text-xs font-normal transition-transform duration-200 ${isOpen ? 'rotate-90 text-red-400' : ''}`}>
@@ -1702,8 +2889,8 @@ export default function ReportsPage() {
                           onClick={() => setActiveReport(item.id)}
                           className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all border ${
                             activeReport === item.id
-                              ? 'bg-red-600/10 text-red-300 border-red-600/20 font-medium'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-800/50 border-transparent'
+                              ? 'bg-sky-500/10 text-sky-400 border-sky-500/20 font-medium'
+                              : 'text-slate-300 hover:text-white hover:bg-slate-800/50 border-transparent'
                           }`}
                         >
                           {item.label}
